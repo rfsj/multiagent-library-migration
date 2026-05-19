@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multiagent-library-migration"
+version = "0.1.0"
+description = "MVP for controlled multi-agent library migration experiments."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "pytest==8.3.4",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
