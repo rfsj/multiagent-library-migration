@@ -16,7 +16,12 @@ def run_simple_workflow(state: WorkflowState) -> WorkflowState:
     migration_agent = MigrationAgent()
     validation_agent = ValidationAgent()
 
-    state.diagnosis = diagnosis_agent.run(state.project_dir, logs_dir)
+    state.diagnosis = diagnosis_agent.run(
+        state.project_dir,
+        logs_dir,
+        source_library=state.source_library,
+        target_library=state.target_library,
+    )
     for step in state.diagnosis["migration_steps"]:
         before_step = snapshots_dir / f"before_{step['step_id']}"
         if before_step.exists():
