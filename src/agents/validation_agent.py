@@ -49,13 +49,13 @@ class ValidationAgent:
         result = {
             "agent": self.name,
             "tests": tests["status"],
-            "old_imports_remaining": len(scan["pandas_imports"]),
-            "unmigrated_uses": len(scan["pandas_api_calls"]),
+            "old_imports_remaining": len(scan["source_imports"]),
+            "unmigrated_uses": len(scan["source_api_calls"]),
             "out_of_scope_changes": diff["out_of_scope_changes"],
             "status": "approved"
             if tests["passed"]
-            and len(scan["pandas_imports"]) == 0
-            and len(scan["pandas_api_calls"]) == 0
+            and len(scan["source_imports"]) == 0
+            and len(scan["source_api_calls"]) == 0
             and diff["out_of_scope_changes"] == 0
             else "rejected",
         }

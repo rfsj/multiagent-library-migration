@@ -45,7 +45,13 @@ def main() -> int:
         _install_project_dependencies(project_dir, logs_dir / "install_before.log")
 
     tests_before = run_pytest(project_dir, logs_dir / "tests_before.log")
-    state = WorkflowState(task_id=args.task_id, project_dir=project_dir, run_dir=run_dir)
+    state = WorkflowState(
+        task_id=args.task_id,
+        project_dir=project_dir,
+        run_dir=run_dir,
+        source_library=metadata["source_library"],
+        target_library=metadata["target_library"],
+    )
     state = run_simple_workflow(state)
 
     if not args.skip_install:
