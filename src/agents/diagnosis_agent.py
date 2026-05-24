@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from src.llm import get_llm
 from src.tools.project_scanner import scan_project
 
 load_dotenv()
@@ -86,12 +85,10 @@ class DiagnosisAgent:
 
     name = "diagnosis_agent"
 
-    def __init__(self, model: str | None = None) -> None:
+    def __init__(self) -> None:
         system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v1.md").read_text(encoding="utf-8")
 
-        llm = ChatAnthropic(
-            model=model or os.getenv("DIAGNOSIS_MODEL", "claude-sonnet-4-6"),
-        ).with_structured_output(DiagnosisPlan)
+        llm = get_llm().with_structured_output(DiagnosisPlan)
 
         self._chain = (
             ChatPromptTemplate.from_messages([
