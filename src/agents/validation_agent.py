@@ -42,8 +42,8 @@ class ValidationAgent:
         )
         return result
 
-    def final_validate(self, project_dir: Path, before_dir: Path, logs_dir: Path) -> dict[str, Any]:
-        scan = scan_project(project_dir)
+    def final_validate(self, project_dir: Path, before_dir: Path, logs_dir: Path, source_library: str) -> dict[str, Any]:
+        scan = scan_project(project_dir, source_library)
         diff = analyze_diff(before_dir, project_dir)
         tests = run_pytest(project_dir, logs_dir / "final_pytest.log")
         result = {

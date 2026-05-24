@@ -58,7 +58,7 @@ def main() -> int:
         _install_project_dependencies(project_dir, logs_dir / "install_after.log")
 
     tests_after = run_pytest(project_dir, logs_dir / "tests_after.log")
-    final_validation = ValidationAgent().final_validate(project_dir, before_dir, logs_dir)
+    final_validation = ValidationAgent().final_validate(project_dir, before_dir, logs_dir, state.source_library)
     diff_text = unified_diff(before_dir, project_dir)
     (run_dir / "diff.patch").write_text(diff_text, encoding="utf-8")
 
