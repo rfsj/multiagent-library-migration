@@ -7,7 +7,7 @@ from typing import Any
 DEPENDENCY_FILES = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg")
 
 
-def scan_project(project_dir: Path, source_library: str = "pandas") -> dict[str, Any]:
+def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
     dependency_files = [
         str(path.relative_to(project_dir))
         for name in DEPENDENCY_FILES

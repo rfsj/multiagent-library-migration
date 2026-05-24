@@ -16,8 +16,8 @@ class DiagnosisAgent:
         self,
         project_dir: Path,
         logs_dir: Path,
-        source_library: str = "pandas",
-        target_library: str = "polars",
+        source_library: str,
+        target_library: str,
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
         scan = scan_project(project_dir, source_library)
