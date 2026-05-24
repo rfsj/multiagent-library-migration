@@ -9,11 +9,11 @@ def get_llm() -> BaseChatModel:
     """Instantiate the configured LangChain chat model from env vars.
 
     Required env vars:
-      LLM_PROVIDER    — "anthropic" or "google"
-      DIAGNOSIS_MODEL — model name for the chosen provider
+      LLM_PROVIDER — "anthropic" or "google"
+      LLM_MODEL    — model name for the chosen provider
     """
     provider = os.environ["LLM_PROVIDER"].lower()
-    model = os.environ["DIAGNOSIS_MODEL"]
+    model = os.environ["LLM_MODEL"]
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic  # noqa: PLC0415
