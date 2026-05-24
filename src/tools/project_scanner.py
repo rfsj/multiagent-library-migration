@@ -7,7 +7,7 @@ from typing import Any
 DEPENDENCY_FILES = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg")
 
 
-def scan_project(project_dir: Path) -> dict[str, Any]:
+def scan_project(project_dir: Path, source_library: str = "pandas") -> dict[str, Any]:
     dependency_files = [
         str(path.relative_to(project_dir))
         for name in DEPENDENCY_FILES
@@ -19,8 +19,8 @@ def scan_project(project_dir: Path) -> dict[str, Any]:
         for path in project_dir.rglob("test*.py")
         if ".venv" not in path.parts
     ]
-    pandas_imports: list[dict[str, Any]] = []
-    pandas_api_calls: list[dict[str, Any]] = []
+    source_imports: list[dict[str, Any]] = []
+    source_api_calls: list[dict[str, Any]] = []
 
     for path in project_dir.rglob("*.py"):
         if ".venv" in path.parts:
@@ -31,38 +31,38 @@ def scan_project(project_dir: Path) -> dict[str, Any]:
             tree = ast.parse(source)
         except SyntaxError:
             continue
-        aliases = _pandas_aliases(tree)
+        aliases = _library_aliases(tree, source_library)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name == "pandas":
-                        pandas_imports.append({"file": rel, "line": node.lineno, "alias": alias.asname})
+                    if alias.name == source_library:
+                        source_imports.append({"file": rel, "line": node.lineno, "alias": alias.asname})
             if isinstance(node, ast.Call):
                 api = _classify_call(node, aliases)
                 if api:
-                    pandas_api_calls.append({"file": rel, "line": node.lineno, "api": api})
+                    source_api_calls.append({"file": rel, "line": node.lineno, "api": api})
             if isinstance(node, ast.Subscript):
                 api = _classify_subscript(node)
                 if api:
-                    pandas_api_calls.append({"file": rel, "line": node.lineno, "api": api})
+                    source_api_calls.append({"file": rel, "line": node.lineno, "api": api})
 
-    affected_files = sorted({item["file"] for item in pandas_imports + pandas_api_calls})
+    affected_files = sorted({item["file"] for item in source_imports + source_api_calls})
     return {
         "dependency_files": sorted(set(dependency_files)),
         "test_files": sorted(test_files),
         "affected_files": affected_files,
-        "pandas_imports": pandas_imports,
-        "pandas_api_calls": pandas_api_calls,
+        "source_imports": source_imports,
+        "source_api_calls": source_api_calls,
     }
 
 
-def _pandas_aliases(tree: ast.AST) -> set[str]:
+def _library_aliases(tree: ast.AST, library: str) -> set[str]:
     aliases: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "pandas":
-                    aliases.add(alias.asname or "pandas")
+                if alias.name == library:
+                    aliases.add(alias.asname or library)
     return aliases
 
 
