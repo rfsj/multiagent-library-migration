@@ -54,20 +54,45 @@ def main() -> int:
     )
     state = run_simple_workflow(state)
 
+    if state.abort_reason:
+        shutil.rmtree(project_dir)
+        shutil.copytree(before_dir, project_dir)
+
     if not args.skip_install:
         _install_project_dependencies(project_dir, logs_dir / "install_after.log")
 
     tests_after = run_pytest(project_dir, logs_dir / "tests_after.log")
-    final_validation = ValidationAgent().final_validate(project_dir, before_dir, logs_dir, state.source_library)
+    if state.abort_reason:
+        final_validation = {
+            "agent": "validation_agent",
+            "tests": "skipped",
+            "old_imports_remaining": None,
+            "unmigrated_uses": None,
+            "out_of_scope_changes": None,
+            "status": "aborted",
+            "skipped": True,
+            "reason": state.abort_reason,
+        }
+    else:
+        final_validation = ValidationAgent().final_validate(project_dir, before_dir, logs_dir, state.source_library)
     diff_text = unified_diff(before_dir, project_dir)
     (run_dir / "diff.patch").write_text(diff_text, encoding="utf-8")
 
-    metrics = build_metrics(tests_before, tests_after, final_validation)
+    metrics = build_metrics(tests_before, tests_after, final_validation, state.retry_counts)
     report = {
         "task_id": metadata["task_id"],
         "source_library": metadata["source_library"],
         "target_library": metadata["target_library"],
         **metrics,
+        "verdicts": state.verdicts,
+        "retry_counts": state.retry_counts,
+        "abort_reason": state.abort_reason,
+        "replan_count": state.replan_count,
+        "replan_history": state.replan_history,
+        "verdict_summary": [
+            {"step_id": verdict["step_id"], "verdict": verdict["verdict"]}
+            for verdict in state.verdicts
+        ],
         "environment": environment_versions(),
         "git_commit": git_commit(),
         "run_dir": str(run_dir),
