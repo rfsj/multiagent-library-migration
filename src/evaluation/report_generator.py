@@ -33,11 +33,14 @@ def write_report(report_path: Path, report: dict[str, Any]) -> None:
 
 
 def git_commit() -> str:
-    proc = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return "unknown"
     return proc.stdout.strip() or "unknown"

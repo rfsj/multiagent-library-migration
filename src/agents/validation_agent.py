@@ -73,7 +73,7 @@ class ValidationAgent:
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
         changed = changed_files(before_dir, project_dir)
-        allowed = set(step.get("allowed_files", [])) | {"requirements.txt"}
+        allowed = set(step.get("allowed_files", []))
         out_of_scope = [path for path in changed if path not in allowed]
         self._install_dependencies(project_dir, logs_dir / f"{step['step_id']}_install.log")
         tests = run_pytest(project_dir, logs_dir / f"{step['step_id']}_pytest.log")
