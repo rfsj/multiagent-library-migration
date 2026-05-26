@@ -28,6 +28,8 @@ Analyze the project below and produce a migration plan from \
 - Dependency files: {dependency_files}
 - Test files: {test_files}
 - Affected files: {affected_files}
+
+{replan_context}
 """
 
 
@@ -104,6 +106,8 @@ class DiagnosisAgent:
         logs_dir: Path,
         source_library: str,
         target_library: str,
+        replan_feedback: dict[str, Any] | None = None,
+        replan_attempt: int = 0,
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
         scan = scan_project(project_dir, source_library)
@@ -115,6 +119,7 @@ class DiagnosisAgent:
             "dependency_files": scan["dependency_files"],
             "test_files": scan["test_files"],
             "affected_files": scan["affected_files"],
+            "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
         })
 
         plan = {
@@ -129,7 +134,8 @@ class DiagnosisAgent:
             "migration_steps": [step.model_dump() for step in result.migration_steps],
         }
 
-        (logs_dir / "diagnosis_plan.json").write_text(
+        log_name = "diagnosis_plan.json" if replan_attempt == 0 else f"diagnosis_plan_replan_{replan_attempt}.json"
+        (logs_dir / log_name).write_text(
             json.dumps(plan, indent=2), encoding="utf-8"
         )
         return plan
@@ -142,3 +148,13 @@ class DiagnosisAgent:
             content = (project_dir / rel_path).read_text(encoding="utf-8")
             parts.append(f"### {rel_path}\n```python\n{content}\n```")
         return "\n\n".join(parts)
+
+    def _build_replan_context(self, replan_feedback: dict[str, Any] | None, replan_attempt: int) -> str:
+        if not replan_feedback:
+            return ""
+        return (
+            f"## Replanning context (attempt {replan_attempt})\n\n"
+            "A previous plan was rejected by the Validation Agent with the following feedback:\n\n"
+            f"{json.dumps(replan_feedback, indent=2, sort_keys=True)}\n\n"
+            "Revise the migration plan to address this feedback."
+        )
