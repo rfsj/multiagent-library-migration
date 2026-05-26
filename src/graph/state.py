@@ -15,3 +15,9 @@ class WorkflowState:
     diagnosis: dict[str, Any] | None = None
     migrations: list[dict[str, Any]] = field(default_factory=list)
     validations: list[dict[str, Any]] = field(default_factory=list)
+    verdicts: list[dict[str, Any]] = field(default_factory=list)
+    retry_counts: dict[str, int] = field(default_factory=dict)
+    abort_reason: str | None = None
+    replan_count: int = 0
+    replan_feedback: dict[str, Any] | None = None
+    replan_history: list[dict[str, Any]] = field(default_factory=list)
