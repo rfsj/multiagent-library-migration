@@ -7,3 +7,6 @@ dist/
 *.egg-info/
 experiments/runs/*
 !experiments/runs/.gitkeep
+uv.lock
+.env
+target/
