@@ -4,10 +4,10 @@ MVP de pesquisa para migração controlada de bibliotecas em projetos de softwar
 usando um fluxo multiagente baseado em LLMs.
 
 O caso inicial migra um projeto Python simples de `pandas` para `polars`.
-Nesta primeira versão, os agentes são implementados de forma determinística
-(rule-based) para tornar o benchmark reproduzível. A arquitetura preserva os
-papéis de diagnóstico, migração e validação para evolução posterior com
-LangGraph e chamadas reais a LLMs.
+A arquitetura separa os papéis de diagnóstico, migração e validação para manter
+o processo auditável e reduzir alterações fora do escopo. O diagnóstico usa
+LangChain com saída estruturada; a execução das etapas planejadas é orquestrada
+com LangGraph, preservando snapshots, logs de migração e validações por etapa.
 
 ## Objetivos do MVP
 
@@ -17,19 +17,44 @@ LangGraph e chamadas reais a LLMs.
 - Gerar logs, diff e relatório JSON.
 - Registrar versões relevantes do ambiente.
 
+## Agentes
+
+O contrato operacional dos agentes está em [`AGENTS.md`](AGENTS.md). O fluxo é
+dividido em três partes:
+
+- **Diagnosis**: analisa o projeto em modo somente leitura e gera o plano JSON.
+- **Migration**: executa uma etapa planejada por vez via LangGraph, respeitando
+  `allowed_files`.
+- **Validation**: compara snapshots, roda testes e aprova ou rejeita cada etapa.
+
 ## Execução rápida
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
+export LLM_PROVIDER=google
+export LLM_MODEL=<modelo>
 python3 scripts/run_task.py task_001_read_csv_filter
 ```
 
-Também é possível usar:
+Também é possível usar `LLM_PROVIDER=anthropic` instalando o extra opcional:
+
+```bash
+pip install -e ".[anthropic]"
+```
+
+Ou executar a tarefa padrão via `make`:
 
 ```bash
 make run-task
+```
+
+Para executar no Docker preservando os artefatos no diretório local
+`experiments/runs/`, use:
+
+```bash
+make docker-run
 ```
 
 Os resultados são gravados em `experiments/runs/`.
@@ -37,6 +62,7 @@ Os resultados são gravados em `experiments/runs/`.
 ## Estrutura
 
 ```text
+AGENTS.md         contrato operacional dos agentes
 src/agents/       agentes de diagnóstico, migração e validação
 src/tools/        scanner, executor de testes, diff e comparação
 src/evaluation/   métricas e geração de relatório

@@ -1,0 +1,8 @@
+services:
+  migration-runner:
+    build: .
+    image: multiagent-library-migration
+    env_file:
+      - .env
+    volumes:
+      - ./experiments/runs:/app/experiments/runs
