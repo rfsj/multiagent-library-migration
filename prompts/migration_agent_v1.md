@@ -16,3 +16,10 @@ Constraints:
 - Do not remove the source library before final validation.
 - Do not modify files outside the planned scope, except dependencies when
   necessary.
+
+## Retry feedback
+
+When a step is retried after a rejection, a `retry_feedback` field may be
+present in the step payload. Read it carefully and apply the requested
+correction before executing the step again. If no `retry_feedback` is present,
+this is the first attempt.

@@ -16,6 +16,7 @@ class MigrationAgent:
         rel_file = Path(step["file"])
         target = project_dir / rel_file
         original = target.read_text(encoding="utf-8")
+        retry_feedback = step.get("retry_feedback")
         migrated = self._migrate_python_source(original)
         changed = migrated != original
         if changed:
@@ -28,6 +29,7 @@ class MigrationAgent:
             "file": step["file"],
             "changed": changed,
             "status": "completed" if changed else "no_change",
+            "retry_feedback_received": bool(retry_feedback),
         }
         (logs_dir / f"{step['step_id']}_migration.json").write_text(
             json.dumps(result, indent=2), encoding="utf-8"
