@@ -1,7 +1,12 @@
 from pathlib import Path
 
 from src.tools.project_scanner import build_project_audit, scan_project
-from src.agents.diagnosis_agent import _migratable_symbols, _should_keep_file_level_step
+from src.agents.diagnosis_agent import (
+    DiagnosisAgent,
+    MigrationStep,
+    _migratable_symbols,
+    _should_keep_file_level_step,
+)
 
 
 def test_task_001_contains_expected_pandas_usage():
@@ -79,3 +84,98 @@ def test_diagnosis_keeps_coupled_analytics_module_as_file_level_step(tmp_path):
     )
 
     assert _should_keep_file_level_step(source, "pandas") is True
+
+
+def test_diagnosis_discards_dataframe_methods_from_allowed_symbols(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "summaries.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def revenue_by_region(path):\n"
+        "    df = pd.read_csv(path)\n"
+        "    return df.groupby('region').sum()\n\n\n"
+        "def latest_order(path):\n"
+        "    df = pd.read_csv(path)\n"
+        "    return df.drop_duplicates(subset=['customer_id'])\n",
+        encoding="utf-8",
+    )
+
+    steps, warnings = DiagnosisAgent.__new__(DiagnosisAgent)._sanitize_migration_steps(
+        [
+            MigrationStep(
+                step_id="step_001",
+                file="src/summaries.py",
+                description="Migrate pandas methods.",
+                allowed_files=["src/summaries.py"],
+                allowed_symbols=["groupby", "drop_duplicates"],
+            )
+        ],
+        ["src/summaries.py"],
+        [],
+        {"target_dependency_action": "none"},
+        project_dir,
+        "pandas",
+    )
+
+    assert [step["allowed_symbols"] for step in steps] == [
+        ["revenue_by_region"],
+        ["latest_order"],
+    ]
+    assert any("removed non-top-level symbols" in warning for warning in warnings)
+
+
+def test_diagnosis_deduplicates_api_level_steps_before_symbol_split(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "analytics.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def load_table(path):\n"
+        "    return pd.read_csv(path)\n\n\n"
+        "def summarize(path):\n"
+        "    df = pd.read_csv(path)\n"
+        "    return df.groupby('region').sum()\n\n\n"
+        "def latest(path):\n"
+        "    df = pd.read_csv(path)\n"
+        "    return df.drop_duplicates(subset=['customer_id'])\n",
+        encoding="utf-8",
+    )
+
+    steps, warnings = DiagnosisAgent.__new__(DiagnosisAgent)._sanitize_migration_steps(
+        [
+            MigrationStep(
+                step_id="step_001",
+                file="src/analytics.py",
+                description="Migrate read_csv.",
+                allowed_files=["src/analytics.py"],
+                allowed_symbols=["pd.read_csv"],
+            ),
+            MigrationStep(
+                step_id="step_002",
+                file="src/analytics.py",
+                description="Migrate groupby.",
+                allowed_files=["src/analytics.py"],
+                allowed_symbols=["pd.DataFrame.groupby"],
+            ),
+            MigrationStep(
+                step_id="step_003",
+                file="src/analytics.py",
+                description="Migrate drop duplicates.",
+                allowed_files=["src/analytics.py"],
+                allowed_symbols=["pd.DataFrame.drop_duplicates"],
+            ),
+        ],
+        ["src/analytics.py"],
+        [],
+        {"target_dependency_action": "none"},
+        project_dir,
+        "pandas",
+    )
+
+    assert [step["allowed_symbols"] for step in steps] == [
+        ["load_table"],
+        ["summarize"],
+        ["latest"],
+    ]
+    assert any("Deduplicated 2 redundant migration step(s)" in warning for warning in warnings)

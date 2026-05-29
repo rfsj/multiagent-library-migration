@@ -209,7 +209,16 @@ class DiagnosisAgent:
                 warnings.append(
                     f"Sanitized step {payload['step_id']} allowed_files; removed {removed}."
                 )
+            if payload["file"].endswith(".py"):
+                payload["allowed_symbols"] = _sanitize_allowed_symbols(
+                    project_dir / payload["file"],
+                    payload.get("allowed_symbols", []),
+                    warnings,
+                    payload["step_id"],
+                    payload["file"],
+                )
             sanitized.append(payload)
+        sanitized = _deduplicate_migration_steps(sanitized, warnings)
         sanitized = self._split_file_steps_by_symbol(
             project_dir,
             sanitized,
@@ -340,6 +349,99 @@ def _migratable_symbols(path: Path, source_library: str) -> list[str]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _symbol_uses_dataframe_api(node, aliases):
             symbols.append(node.name)
     return symbols
+
+
+def _sanitize_allowed_symbols(
+    path: Path,
+    symbols: list[str],
+    warnings: list[str],
+    step_id: str,
+    rel_file: str,
+) -> list[str]:
+    if not symbols:
+        return []
+    valid_symbols = _top_level_symbol_names(path)
+    sanitized = [symbol for symbol in symbols if symbol in valid_symbols]
+    removed = sorted(set(symbols) - set(sanitized))
+    if removed:
+        warnings.append(
+            f"Sanitized step {step_id} allowed_symbols for {rel_file}; "
+            f"removed non-top-level symbols {removed}."
+        )
+    return sanitized
+
+
+def _deduplicate_migration_steps(
+    steps: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    ordered_files = []
+    for step in steps:
+        rel_file = step["file"]
+        if rel_file not in grouped:
+            grouped[rel_file] = []
+            ordered_files.append(rel_file)
+        grouped[rel_file].append(step)
+
+    deduplicated: list[dict[str, Any]] = []
+    for rel_file in ordered_files:
+        file_steps = grouped[rel_file]
+        file_level_steps = [
+            step for step in file_steps if not step.get("allowed_symbols")
+        ]
+        if file_level_steps:
+            kept = _merge_step_group(file_level_steps, file_steps[0])
+            deduplicated.append(kept)
+            removed_count = len(file_steps) - 1
+            if removed_count:
+                warnings.append(
+                    f"Deduplicated {removed_count} redundant migration step(s) "
+                    f"for {rel_file}; kept one file-level step."
+                )
+            continue
+
+        seen_keys: set[tuple[str, ...]] = set()
+        for step in file_steps:
+            key = tuple(step.get("allowed_symbols", []))
+            if key in seen_keys:
+                warnings.append(
+                    f"Dropped duplicate migration step for {rel_file} "
+                    f"with allowed_symbols {list(key)}."
+                )
+                continue
+            seen_keys.add(key)
+            deduplicated.append(step)
+    return deduplicated
+
+
+def _merge_step_group(
+    file_level_steps: list[dict[str, Any]],
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(file_level_steps[0] if file_level_steps else fallback)
+    allowed_files: list[str] = []
+    for step in file_level_steps or [fallback]:
+        for rel_path in step.get("allowed_files", []):
+            if rel_path not in allowed_files:
+                allowed_files.append(rel_path)
+    merged["allowed_files"] = allowed_files
+    merged["allowed_symbols"] = []
+    return merged
+
+
+def _top_level_symbol_names(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return set()
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
 
 
 def _symbol_uses_dataframe_api(node: ast.AST, aliases: set[str]) -> bool:
