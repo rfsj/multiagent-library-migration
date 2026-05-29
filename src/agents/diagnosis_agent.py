@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from src.llm import get_llm
-from src.tools.project_scanner import scan_project
+from src.tools.project_scanner import build_project_audit, scan_project
 
 load_dotenv()
 
@@ -26,8 +27,10 @@ Analyze the project below and produce a migration plan from \
 ## Structural metadata (from static analysis)
 
 - Dependency files: {dependency_files}
+- Dependency summary: {dependency_summary}
 - Test files: {test_files}
-- Affected files: {affected_files}
+- Production files requiring migration: {affected_source_files}
+- Test files that use {source_library} for fixtures/assertions: {test_files_with_source_library_usage}
 
 {replan_context}
 """
@@ -54,6 +57,12 @@ class MigrationStep(BaseModel):
             "dependency change is needed."
         )
     )
+    allowed_symbols: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional function or class names this step is allowed to migrate inside file."
+        ),
+    )
     status: str = Field(
         default="planned",
         description="Always 'planned'.",
@@ -65,7 +74,7 @@ class DiagnosisPlan(BaseModel):
     target_library: str = Field(description="Library being migrated to.")
     dependency_files: list[str] = Field(description="Dependency files found in the project.")
     affected_files: list[str] = Field(
-        description="Source files that import or call the source library."
+        description="Production files that import or call the source library."
     )
     related_tests: list[str] = Field(
         description="Test files associated with the affected source files."
@@ -111,16 +120,31 @@ class DiagnosisAgent:
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
         scan = scan_project(project_dir, source_library)
+        audit = build_project_audit(project_dir, source_library, target_library)
+        audit_log_name = "project_audit.json" if replan_attempt == 0 else f"project_audit_replan_{replan_attempt}.json"
+        (logs_dir / audit_log_name).write_text(
+            json.dumps(audit, indent=2), encoding="utf-8"
+        )
 
         result: DiagnosisPlan = self._chain.invoke({
             "source_library": source_library,
             "target_library": target_library,
-            "file_contents": self._collect_file_contents(project_dir, scan["affected_files"]),
+            "file_contents": self._collect_file_contents(project_dir, scan["affected_source_files"]),
             "dependency_files": scan["dependency_files"],
+            "dependency_summary": json.dumps(audit["dependency_summary"], indent=2, sort_keys=True),
             "test_files": scan["test_files"],
-            "affected_files": scan["affected_files"],
+            "affected_source_files": scan["affected_source_files"],
+            "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
             "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
         })
+        migration_steps, planner_warnings = self._sanitize_migration_steps(
+            result.migration_steps,
+            scan["affected_source_files"],
+            scan["dependency_files"],
+            audit["dependency_summary"],
+            project_dir,
+            source_library,
+        )
 
         plan = {
             "agent": self.name,
@@ -128,10 +152,14 @@ class DiagnosisAgent:
             "target_library": result.target_library,
             "read_only": True,
             "dependency_files": result.dependency_files,
+            "dependency_summary": audit["dependency_summary"],
             "affected_files": result.affected_files,
+            "affected_source_files": scan["affected_source_files"],
+            "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
-            "migration_steps": [step.model_dump() for step in result.migration_steps],
+            "planner_warnings": planner_warnings,
+            "migration_steps": migration_steps,
         }
 
         log_name = "diagnosis_plan.json" if replan_attempt == 0 else f"diagnosis_plan_replan_{replan_attempt}.json"
@@ -149,6 +177,108 @@ class DiagnosisAgent:
             parts.append(f"### {rel_path}\n```python\n{content}\n```")
         return "\n\n".join(parts)
 
+    def _sanitize_migration_steps(
+        self,
+        steps: list[MigrationStep],
+        affected_source_files: list[str],
+        dependency_files: list[str],
+        dependency_summary: dict[str, Any],
+        project_dir: Path,
+        source_library: str,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        allowed_targets = set(affected_source_files) | set(dependency_files)
+        allowed_scope = allowed_targets
+        sanitized = []
+        warnings = []
+        for step in steps:
+            payload = step.model_dump()
+            if payload["file"] not in allowed_targets:
+                warnings.append(
+                    f"Dropped step {payload['step_id']} for {payload['file']}: "
+                    "file is not a production affected file or dependency file."
+                )
+                continue
+            original_allowed = list(payload.get("allowed_files", []))
+            payload["allowed_files"] = [
+                file for file in original_allowed if file in allowed_scope
+            ]
+            if payload["file"] not in payload["allowed_files"]:
+                payload["allowed_files"].insert(0, payload["file"])
+            removed = sorted(set(original_allowed) - set(payload["allowed_files"]))
+            if removed:
+                warnings.append(
+                    f"Sanitized step {payload['step_id']} allowed_files; removed {removed}."
+                )
+            sanitized.append(payload)
+        sanitized = self._split_file_steps_by_symbol(
+            project_dir,
+            sanitized,
+            source_library,
+            dependency_summary,
+            dependency_files,
+            warnings,
+        )
+        if (
+            sanitized
+            and dependency_summary.get("target_dependency_action") == "add_dependency"
+            and "requirements.txt" in dependency_files
+            and "requirements.txt" not in sanitized[0]["allowed_files"]
+        ):
+            sanitized[0]["allowed_files"].append("requirements.txt")
+            warnings.append(
+                "Added requirements.txt to the first migration step because the target "
+                "dependency is not present and the step may introduce target-library imports."
+            )
+        return sanitized, warnings
+
+    def _split_file_steps_by_symbol(
+        self,
+        project_dir: Path,
+        steps: list[dict[str, Any]],
+        source_library: str,
+        dependency_summary: dict[str, Any],
+        dependency_files: list[str],
+        warnings: list[str],
+    ) -> list[dict[str, Any]]:
+        split_steps: list[dict[str, Any]] = []
+        next_index = 1
+        for step in steps:
+            rel_file = step["file"]
+            if not rel_file.endswith(".py") or step.get("allowed_symbols"):
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                split_steps.append(cloned)
+                next_index += 1
+                continue
+
+            symbols = _migratable_symbols(project_dir / rel_file, source_library)
+            if len(symbols) <= 1:
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                split_steps.append(cloned)
+                next_index += 1
+                continue
+
+            warnings.append(
+                f"Split {rel_file} into {len(symbols)} symbol-level migration steps."
+            )
+            for symbol in symbols:
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                cloned["description"] = f"Migrate symbol {symbol} in {rel_file}."
+                cloned["allowed_symbols"] = [symbol]
+                split_steps.append(cloned)
+                next_index += 1
+
+        if (
+            split_steps
+            and dependency_summary.get("target_dependency_action") == "add_dependency"
+            and "requirements.txt" in dependency_files
+            and "requirements.txt" not in split_steps[0]["allowed_files"]
+        ):
+            split_steps[0]["allowed_files"].append("requirements.txt")
+        return split_steps
+
     def _build_replan_context(self, replan_feedback: dict[str, Any] | None, replan_attempt: int) -> str:
         if not replan_feedback:
             return ""
@@ -158,3 +288,58 @@ class DiagnosisAgent:
             f"{json.dumps(replan_feedback, indent=2, sort_keys=True)}\n\n"
             "Revise the migration plan to address this feedback."
         )
+
+
+_DATAFRAME_METHODS = {
+    "agg",
+    "apply",
+    "astype",
+    "copy",
+    "drop_duplicates",
+    "dt",
+    "fillna",
+    "groupby",
+    "isna",
+    "isin",
+    "merge",
+    "pivot_table",
+    "reset_index",
+    "round",
+    "sort_values",
+    "to_dict",
+}
+
+
+def _migratable_symbols(path: Path, source_library: str) -> list[str]:
+    if not path.exists():
+        return []
+    source = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    aliases = {source_library}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == source_library:
+                    aliases.add(alias.asname or source_library)
+
+    symbols = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _symbol_uses_dataframe_api(node, aliases):
+            symbols.append(node.name)
+    return symbols
+
+
+def _symbol_uses_dataframe_api(node: ast.AST, aliases: set[str]) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Attribute):
+            if isinstance(child.value, ast.Name) and child.value.id in aliases:
+                return True
+            if child.attr in _DATAFRAME_METHODS:
+                return True
+        if isinstance(child, ast.Subscript):
+            return True
+    return False

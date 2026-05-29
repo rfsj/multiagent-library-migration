@@ -45,6 +45,7 @@ Each entry represents one atomic migration step:
   "file": "src/orders/processing.py",
   "description": "Migrate supported pandas read/filter/select/sort usage to Polars.",
   "allowed_files": [ "src/orders/processing.py" ],
+  "allowed_symbols": [ "get_paid_orders" ],
   "status": "planned"
 }
 ```
@@ -55,7 +56,13 @@ Each entry represents one atomic migration step:
 | `file` | string | File path relative to the repository root. |
 | `description` | string | Human-readable summary of the step's intent. |
 | `allowed_files` | array&lt;string&gt; | Files the MigrationAgent is allowed to modify in this step. |
+| `allowed_symbols` | array&lt;string&gt; | Optional function/class names inside `file` that this step may migrate. When present, validation checks source-library usage for those symbols instead of the whole file. |
 | `status` | string | Initial state: always `"planned"`. Updated by the MigrationAgent to `"completed"` or `"no_change"`. |
+
+For larger files, the planner may split one file into multiple symbol-level
+steps. This allows the workflow to measure partial migration success: one
+function can fail and be marked for manual review while later functions are
+still attempted.
 
 ---
 
@@ -79,6 +86,7 @@ Each entry represents one atomic migration step:
       "file": "src/orders/processing.py",
       "description": "Migrate supported pandas read/filter/select/sort usage to Polars.",
       "allowed_files": [ "src/orders/processing.py" ],
+      "allowed_symbols": [ "get_paid_orders" ],
       "status": "planned"
     }
   ]

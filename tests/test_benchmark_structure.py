@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from src.tools.project_scanner import scan_project
+from src.tools.project_scanner import build_project_audit, scan_project
+from src.agents.diagnosis_agent import _migratable_symbols
 
 
 def test_task_001_contains_expected_pandas_usage():
@@ -16,3 +17,49 @@ def test_task_001_contains_expected_pandas_usage():
         "column_selection",
         "sort_values",
     }
+
+
+def test_scanner_separates_source_and_test_pandas_usage(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    tests_dir = project_dir / "tests"
+    source_dir.mkdir(parents=True)
+    tests_dir.mkdir()
+    (project_dir / "requirements.txt").write_text("pandas==2.2.3\n", encoding="utf-8")
+    (source_dir / "processing.py").write_text(
+        "import pandas as pd\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+    (tests_dir / "test_processing.py").write_text(
+        "import pandas as pd\n\n"
+        "def test_builds_expected_frame():\n"
+        "    assert len(pd.DataFrame({'a': [1]})) == 1\n",
+        encoding="utf-8",
+    )
+
+    audit = build_project_audit(project_dir, "pandas", "polars")
+
+    assert audit["affected_source_files"] == ["src/processing.py"]
+    assert audit["test_files_with_source_library_usage"] == ["tests/test_processing.py"]
+    assert audit["source_import_count"] == 1
+    assert audit["test_import_count"] == 1
+    assert audit["dependency_summary"]["source_dependency_present"] is True
+    assert audit["dependency_summary"]["target_dependency_action"] == "add_dependency"
+
+
+def test_diagnosis_symbol_detection_finds_dataframe_functions(tmp_path):
+    source = tmp_path / "processing.py"
+    source.write_text(
+        "import pandas as pd\n\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n\n\n"
+        "def summarize(df):\n"
+        "    return df.groupby('region').agg({'total': 'sum'})\n\n\n"
+        "def helper(value):\n"
+        "    return value + 1\n",
+        encoding="utf-8",
+    )
+
+    assert _migratable_symbols(source, "pandas") == ["load", "summarize"]
