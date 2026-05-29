@@ -244,6 +244,20 @@ class DiagnosisAgent:
         next_index = 1
         for step in steps:
             rel_file = step["file"]
+            if rel_file.endswith(".py") and _should_keep_file_level_step(
+                project_dir / rel_file, source_library
+            ):
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                cloned["allowed_symbols"] = []
+                split_steps.append(cloned)
+                next_index += 1
+                warnings.append(
+                    f"Kept {rel_file} as a file-level step because its pandas "
+                    "functions are coupled through shared helper calls."
+                )
+                continue
+
             if not rel_file.endswith(".py") or step.get("allowed_symbols"):
                 cloned = dict(step)
                 cloned["step_id"] = f"step_{next_index:03d}"
@@ -319,12 +333,7 @@ def _migratable_symbols(path: Path, source_library: str) -> list[str]:
     except SyntaxError:
         return []
 
-    aliases = {source_library}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == source_library:
-                    aliases.add(alias.asname or source_library)
+    aliases = _library_aliases(tree, source_library)
 
     symbols = []
     for node in tree.body:
@@ -343,3 +352,69 @@ def _symbol_uses_dataframe_api(node: ast.AST, aliases: set[str]) -> bool:
         if isinstance(child, ast.Subscript):
             return True
     return False
+
+
+def _library_aliases(tree: ast.AST, source_library: str) -> set[str]:
+    aliases = {source_library}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == source_library:
+                    aliases.add(alias.asname or source_library)
+    return aliases
+
+
+def _should_keep_file_level_step(path: Path, source_library: str = "pandas") -> bool:
+    if not path.exists():
+        return False
+    source = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+
+    aliases = _library_aliases(tree, source_library)
+    top_level_symbols = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    dataframe_symbols = {
+        name
+        for name, node in top_level_symbols.items()
+        if _symbol_uses_dataframe_api(node, aliases)
+    }
+    if len(dataframe_symbols) <= 1:
+        return False
+
+    for name in dataframe_symbols:
+        if _calls_local_symbol(top_level_symbols[name], dataframe_symbols - {name}):
+            return True
+    return any(
+        isinstance(node, ast.ClassDef)
+        and _class_has_multiple_dataframe_methods(node, aliases)
+        for node in top_level_symbols.values()
+    )
+
+
+def _calls_local_symbol(node: ast.AST, symbol_names: set[str]) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            if isinstance(child.func, ast.Name) and child.func.id in symbol_names:
+                return True
+            if isinstance(child.func, ast.Attribute) and child.func.attr in symbol_names:
+                return True
+    return False
+
+
+def _class_has_multiple_dataframe_methods(node: ast.ClassDef, aliases: set[str]) -> bool:
+    dataframe_methods = [
+        child
+        for child in node.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _symbol_uses_dataframe_api(child, aliases)
+    ]
+    if len(dataframe_methods) <= 1:
+        return False
+    method_names = {method.name for method in dataframe_methods}
+    return any(_calls_local_symbol(method, method_names - {method.name}) for method in dataframe_methods)

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.tools.project_scanner import build_project_audit, scan_project
-from src.agents.diagnosis_agent import _migratable_symbols
+from src.agents.diagnosis_agent import _migratable_symbols, _should_keep_file_level_step
 
 
 def test_task_001_contains_expected_pandas_usage():
@@ -63,3 +63,19 @@ def test_diagnosis_symbol_detection_finds_dataframe_functions(tmp_path):
     )
 
     assert _migratable_symbols(source, "pandas") == ["load", "summarize"]
+
+
+def test_diagnosis_keeps_coupled_analytics_module_as_file_level_step(tmp_path):
+    source = tmp_path / "processing.py"
+    source.write_text(
+        "import pandas as pd\n\n\n"
+        "def load_table(path):\n"
+        "    return pd.read_csv(path)\n\n\n"
+        "def summarize_by_region(path):\n"
+        "    return load_table(path).groupby('region').sum()\n\n\n"
+        "def latest_by_account(path):\n"
+        "    return load_table(path).drop_duplicates(subset=['account_id'])\n",
+        encoding="utf-8",
+    )
+
+    assert _should_keep_file_level_step(source, "pandas") is True

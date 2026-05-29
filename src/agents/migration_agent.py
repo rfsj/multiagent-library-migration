@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import ast
 import re
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -75,9 +76,6 @@ class MigrationAgent:
         if allowed_symbols:
             return self._migrate_python_symbols(source, allowed_symbols)
 
-        if self._looks_like_lookup_util_module(source):
-            return self._migrate_lookup_util_module(source)
-
         output = source
         output = re.sub(r"^import pandas as pd$", "import polars as pl", output, flags=re.MULTILINE)
         return self._migrate_python_snippet(output)
@@ -113,7 +111,11 @@ class MigrationAgent:
 
     def _migrate_python_snippet(self, source: str) -> str:
         output = source
+        output = output.replace("pd.DataFrame(", "pl.DataFrame(")
+        output = output.replace("pd.Series(", "pl.Series(")
+        output = output.replace("pd.concat(", "pl.concat(")
         output = output.replace("pd.read_csv(", "pl.read_csv(")
+        output = output.replace("pd.read_json(", "pl.read_json(")
         output = re.sub(
             r'(\w+)\s*=\s*\1\[\1\["([^"]+)"\]\s*==\s*"([^"]+)"\]',
             r'\1 = \1.filter(pl.col("\2") == "\3")',
@@ -129,7 +131,12 @@ class MigrationAgent:
             r"\1.select([\2]).sort(\3)",
             output,
         )
+        output = output.replace('.to_dict("records")', ".to_dicts()")
+        output = output.replace(".to_dict('records')", ".to_dicts()")
+        output = re.sub(r"\.groupby\(", ".group_by(", output)
+        output = re.sub(r"\.drop_duplicates\(", ".unique(", output)
         output = re.sub(r"\.sort_values\(", ".sort(", output)
+        output = re.sub(r"\.reset_index\(drop=True\)", "", output)
         return output
 
     def _ensure_polars_import(self, source: str) -> str:
@@ -153,68 +160,6 @@ class MigrationAgent:
             return source
         return re.sub(r"^import pandas as pd\n+", "", source, flags=re.MULTILINE)
 
-    def _looks_like_lookup_util_module(self, source: str) -> bool:
-        return all(
-            marker in source
-            for marker in (
-                "def get_article_journal_from_data(",
-                "def get_article_date_from_data(",
-                "def get_drug_info_from_name(",
-                "def get_article_info_from_name(",
-            )
-        )
-
-    def _migrate_lookup_util_module(self, source: str) -> str:
-        remove_file_extension = re.search(
-            r"def remove_file_extension\(file_name: str\) -> str:.*?return file_name\.split\(\"/\"\)\[-1\]\.split\(\"\.\"\)\[0\]\n",
-            source,
-            flags=re.DOTALL,
-        )
-        remove_file_extension_block = (
-            remove_file_extension.group(0).rstrip()
-            if remove_file_extension
-            else (
-                "def remove_file_extension(file_name: str) -> str:\n"
-                "    return file_name.split(\"/\")[-1].split(\".\")[0]"
-            )
-        )
-        return (
-            "from typing import Any\n\n\n"
-            f"{remove_file_extension_block}\n\n\n"
-            "def _records(frame: Any) -> list[dict[str, Any]]:\n"
-            "    if hasattr(frame, \"to_dicts\"):\n"
-            "        return frame.to_dicts()\n"
-            "    if hasattr(frame, \"to_dict\"):\n"
-            "        return frame.to_dict(\"records\")\n"
-            "    return list(frame)\n\n\n"
-            "def _first_record(frame: Any, column: str, value: str) -> dict[str, Any]:\n"
-            "    for record in _records(frame):\n"
-            "        if record.get(column) == value:\n"
-            "            return record\n"
-            "    raise IndexError(f\"No record found where {column}={value!r}\")\n\n\n"
-            "def get_article_journal_from_data(data: dict[str, Any], article_name: str) -> str:\n"
-            "    try:\n"
-            "        return _first_record(data[\"pubmed\"], \"title\", article_name)[\"journal\"]\n"
-            "    except IndexError:\n"
-            "        return _first_record(\n"
-            "            data[\"clinical_trials\"], \"scientific_title\", article_name\n"
-            "        )[\"journal\"]\n\n\n"
-            "def get_article_date_from_data(data: dict[str, Any], article_name: str) -> str:\n"
-            "    try:\n"
-            "        return _first_record(data[\"pubmed\"], \"title\", article_name)[\"date\"]\n"
-            "    except IndexError:\n"
-            "        return _first_record(\n"
-            "            data[\"clinical_trials\"], \"scientific_title\", article_name\n"
-            "        )[\"date\"]\n\n\n"
-            "def get_drug_info_from_name(drug: str, data: dict[str, Any]) -> dict[str, Any]:\n"
-            "    return _first_record(data[\"drugs\"], \"drug\", drug)\n\n\n"
-            "def get_article_info_from_name(article: str, data: dict[str, Any]) -> dict[str, Any]:\n"
-            "    try:\n"
-            "        return _first_record(data[\"clinical_trials\"], \"scientific_title\", article)\n"
-            "    except IndexError:\n"
-            "        return _first_record(data[\"pubmed\"], \"title\", article)\n"
-        )
-
     def _migrate_requirements(self, source: str, step: dict[str, Any]) -> str:
         target_library = step.get("target_library")
         if not target_library:
@@ -222,7 +167,101 @@ class MigrationAgent:
                 f"Step {step['step_id']} targets requirements.txt, "
                 "but no target_library was provided by diagnosis."
             )
-        if re.search(rf"^{re.escape(target_library)}([<>=!~]=|==|$)", source, flags=re.MULTILINE):
+        if self._requirements_contains_package(source, target_library):
             return source
         suffix = "" if source.endswith("\n") else "\n"
-        return source + suffix + f"{target_library}\n"
+        if self._uses_hash_locked_requirements(source):
+            dependency = self._resolve_hashed_requirement(target_library)
+        else:
+            dependency = target_library
+        return source + suffix + dependency + "\n"
+
+    def _requirements_contains_package(self, source: str, package_name: str) -> bool:
+        normalized_package = _normalize_package_name(package_name)
+        for raw_line in source.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith("-"):
+                continue
+            match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", line)
+            if match and _normalize_package_name(match.group("name")) == normalized_package:
+                return True
+        return False
+
+    def _uses_hash_locked_requirements(self, source: str) -> bool:
+        return "--hash=sha256:" in source
+
+    def _resolve_hashed_requirement(self, package_name: str) -> str:
+        return "\n".join(
+            self._resolve_hashed_requirement_blocks(package_name, version=None, seen=set())
+        )
+
+    def _resolve_hashed_requirement_blocks(
+        self,
+        package_name: str,
+        version: str | None,
+        seen: set[str],
+    ) -> list[str]:
+        metadata = self._fetch_pypi_package_metadata(package_name, version)
+        version = metadata["info"]["version"]
+        normalized_key = f"{_normalize_package_name(package_name)}=={version}"
+        if normalized_key in seen:
+            return []
+        seen.add(normalized_key)
+
+        files = metadata.get("releases", {}).get(version, metadata.get("urls", []))
+        hashes = sorted({
+            file_info.get("digests", {}).get("sha256")
+            for file_info in files
+            if file_info.get("digests", {}).get("sha256")
+        })
+        if not hashes:
+            raise RuntimeError(
+                f"Could not resolve sha256 hashes for {package_name}=={version} from PyPI."
+            )
+
+        lines = [f"{package_name}=={version} \\"]
+        for index, digest in enumerate(hashes):
+            continuation = " \\" if index < len(hashes) - 1 else ""
+            lines.append(f"    --hash=sha256:{digest}{continuation}")
+        blocks = ["\n".join(lines)]
+        for requirement in metadata["info"].get("requires_dist") or []:
+            pinned_dependency = _pinned_runtime_dependency(requirement)
+            if not pinned_dependency:
+                continue
+            dependency_name, dependency_version = pinned_dependency
+            blocks.extend(
+                self._resolve_hashed_requirement_blocks(
+                    dependency_name,
+                    version=dependency_version,
+                    seen=seen,
+                )
+            )
+        return blocks
+
+    def _fetch_pypi_package_metadata(
+        self,
+        package_name: str,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        if version:
+            url = f"https://pypi.org/pypi/{package_name}/{version}/json"
+        else:
+            url = f"https://pypi.org/pypi/{package_name}/json"
+        with urllib.request.urlopen(url, timeout=20) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+
+def _normalize_package_name(name: str) -> str:
+    return name.replace("_", "-").lower()
+
+
+def _pinned_runtime_dependency(requirement: str) -> tuple[str, str] | None:
+    if ";" in requirement:
+        return None
+    match = re.match(
+        r"(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[A-Za-z0-9_.!+*-]+)$",
+        requirement.strip(),
+    )
+    if not match:
+        return None
+    return match.group("name"), match.group("version")
