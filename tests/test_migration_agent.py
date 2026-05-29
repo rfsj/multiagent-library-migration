@@ -154,3 +154,115 @@ def test_dependency_step_preserves_existing_target_version(tmp_path):
 
     assert result["status"] == "no_change"
     assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npolars==1.17.1\npytest==8.3.4\n"
+
+
+def test_lookup_util_module_migrates_away_from_pandas_import(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "etl"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    util_file = source_dir / "util.py"
+    util_file.write_text(
+        "import pandas as pd\n\n\n"
+        "def remove_file_extension(file_name: str) -> str:\n"
+        "    return file_name.split(\"/\")[-1].split(\".\")[0]\n\n\n"
+        "def get_article_journal_from_data(data: dict[str, pd.DataFrame], article_name: str) -> str:\n"
+        "    try:\n"
+        "        return data[\"pubmed\"][data[\"pubmed\"][\"title\"] == article_name][\"journal\"].values[0]\n"
+        "    except IndexError:\n"
+        "        return data[\"clinical_trials\"][data[\"clinical_trials\"][\"scientific_title\"] == article_name][\"journal\"].values[0]\n\n\n"
+        "def get_article_date_from_data(data: dict[str, pd.DataFrame], article_name: str) -> str:\n"
+        "    try:\n"
+        "        return data[\"pubmed\"][data[\"pubmed\"][\"title\"] == article_name][\"date\"].values[0]\n"
+        "    except IndexError:\n"
+        "        return data[\"clinical_trials\"][data[\"clinical_trials\"][\"scientific_title\"] == article_name][\"date\"].values[0]\n\n\n"
+        "def get_drug_info_from_name(drug: str, data: pd.DataFrame) -> dict[str, str]:\n"
+        "    return data[\"drugs\"][data[\"drugs\"][\"drug\"] == drug].to_dict(\"records\")[0]\n\n\n"
+        "def get_article_info_from_name(article: str, data: pd.DataFrame) -> dict[str, str]:\n"
+        "    try:\n"
+        "        return data[\"clinical_trials\"][data[\"clinical_trials\"][\"scientific_title\"] == article].to_dict(\"records\")[0]\n"
+        "    except IndexError:\n"
+        "        return data[\"pubmed\"][data[\"pubmed\"][\"title\"] == article].to_dict(\"records\")[0]\n",
+        encoding="utf-8",
+    )
+
+    result = MigrationAgent().run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "etl/util.py",
+            "allowed_files": ["etl/util.py"],
+        },
+        logs_dir,
+    )
+
+    migrated = util_file.read_text(encoding="utf-8")
+    assert result["status"] == "completed"
+    assert "import pandas" not in migrated
+    assert "pd." not in migrated
+    assert "_first_record" in migrated
+
+
+def test_symbol_step_only_updates_allowed_function(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    python_file.write_text(
+        "import pandas as pd\n\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n\n\n"
+        "def untouched(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+
+    result = MigrationAgent().run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "allowed_symbols": ["load"],
+        },
+        logs_dir,
+    )
+
+    migrated = python_file.read_text(encoding="utf-8")
+    assert result["status"] == "completed"
+    assert "import pandas as pd" in migrated
+    assert "import polars as pl" in migrated
+    assert "def load(path):\n    return pl.read_csv(path)" in migrated
+    assert "def untouched(path):\n    return pd.read_csv(path)" in migrated
+
+
+def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    python_file.write_text(
+        "import pandas as pd\n\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+
+    result = MigrationAgent().run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "allowed_symbols": ["load"],
+        },
+        logs_dir,
+    )
+
+    migrated = python_file.read_text(encoding="utf-8")
+    assert result["status"] == "completed"
+    assert "import pandas as pd" not in migrated
+    assert "import polars as pl" in migrated
+    assert "pd." not in migrated
