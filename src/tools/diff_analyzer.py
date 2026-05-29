@@ -51,12 +51,20 @@ def unified_diff(before_dir: Path, after_dir: Path) -> str:
     return proc.stdout
 
 
-def analyze_diff(before_dir: Path, after_dir: Path) -> dict[str, Any]:
+def analyze_diff(
+    before_dir: Path,
+    after_dir: Path,
+    allowed_files: list[str] | None = None,
+) -> dict[str, Any]:
     changed = changed_files(before_dir, after_dir)
-    expected_prefixes = ("src/", "requirements.txt")
-    out_of_scope = [
-        path for path in changed if not (path == "requirements.txt" or path.startswith(expected_prefixes))
-    ]
+    if allowed_files is None:
+        expected_prefixes = ("src/", "requirements.txt")
+        out_of_scope = [
+            path for path in changed if not (path == "requirements.txt" or path.startswith(expected_prefixes))
+        ]
+    else:
+        allowed = set(allowed_files)
+        out_of_scope = [path for path in changed if path not in allowed]
     return {
         "changed_files": changed,
         "out_of_scope_changes": len(out_of_scope),
