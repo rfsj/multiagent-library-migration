@@ -1,0 +1,10 @@
+{
+  "task_id": "task_002_complex_pandas_ops",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a small analytics project with varied pandas operations: CSV reading, filtering, grouping, joins, pivots, datetime parsing, fillna, sorting and deduplication.",
+  "expected_changed_files": [
+    "src/analytics/processing.py",
+    "requirements.txt"
+  ]
+}

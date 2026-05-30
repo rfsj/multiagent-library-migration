@@ -1,0 +1,12 @@
+{
+  "task_id": "task_003_multi_file_pandas_ops",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a small analytics project with pandas usage spread across multiple small files: loading/enrichment, aggregations, joins, deduplication and quality checks.",
+  "expected_changed_files": [
+    "src/analytics/loaders.py",
+    "src/analytics/summaries.py",
+    "src/analytics/quality.py",
+    "requirements.txt"
+  ]
+}
