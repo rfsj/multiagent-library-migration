@@ -49,5 +49,8 @@ def run_simple_workflow(state: WorkflowState) -> WorkflowState:
         },
     )
 
-    final_state = graph.compile().invoke(to_graph_state(state))
+    final_state = graph.compile().invoke(
+        to_graph_state(state),
+        config={"recursion_limit": 100},
+    )
     return to_workflow_state(state, final_state)

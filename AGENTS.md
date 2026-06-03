@@ -16,6 +16,24 @@ o plano, as alteracoes, as validacoes, os testes, o diff e o relatorio final em
 - Preservar testes existentes como criterio de regressao.
 - Produzir evidencias replicaveis para comparacao experimental.
 
+## Generalizacao do Multiagente
+
+O objetivo do sistema multiagente e migrar diferentes codigos e projetos Python,
+nao se adaptar a um unico repositorio especifico. Toda melhoria deve aumentar a
+capacidade geral do framework de receber o maior numero possivel de projetos
+reais, mantendo o contrato de auditoria.
+
+Ao adicionar suporte para um caso encontrado em um projeto real, prefira
+implementar uma regra, abstracao, scanner, validacao ou contrato reutilizavel
+para outros projetos. Evite solucoes que dependam de nomes, caminhos, fixtures
+ou estruturas exclusivas de um repositorio, a menos que isso esteja claramente
+isolado como uma tarefa de benchmark e documentado como excecao.
+
+Se um projeto real revelar uma limitacao do framework, registre a limitacao de
+forma auditavel e evolua o comportamento geral do diagnosis, migration ou
+validation. Nao esconda falhas alterando testes ou moldando o projeto de entrada
+apenas para um caso passar.
+
 ## Fluxo dos Agentes
 
 O workflow e dividido em tres partes: diagnosis, migration e validation. Cada
@@ -42,6 +60,9 @@ Responsavel por entender o projeto antes de qualquer edicao.
 - Estima a complexidade por arquivo afetado.
 - Gera uma lista ordenada de `migration_steps`.
 - Define `allowed_files` para cada etapa.
+- Quando um arquivo tiver multiplas funcoes migraveis, pode definir
+  `allowed_symbols` para criar etapas por funcao/classe e medir sucesso
+  parcial de forma mais auditavel.
 - Escreve `logs/diagnosis_plan.json`.
 
 Contrato principal:
@@ -59,6 +80,8 @@ Responsavel por executar uma etapa planejada por vez.
 - Consome os `migration_steps` produzidos no diagnostico.
 - Altera apenas arquivos listados em `allowed_files` e, quando necessario,
   arquivos de dependencia.
+- Quando `allowed_symbols` existir, limita a alteracao ao simbolo planejado
+  dentro do arquivo.
 - Atualiza a implementacao da biblioteca de origem para a biblioteca alvo.
 - Mantem a menor mudanca suficiente para preservar o comportamento.
 - Escreve logs por etapa, como `logs/step_001_migration.json`.
@@ -84,6 +107,9 @@ Responsavel por validar cada etapa e a execucao final de forma independente.
 Contrato principal:
 
 - Rejeitar etapas com alteracoes fora de `allowed_files`.
+- Em etapas com `allowed_symbols`, validar uso remanescente da biblioteca de
+  origem no simbolo planejado, sem exigir que o arquivo inteiro ja esteja
+  migrado.
 - Rejeitar etapas quando testes falham.
 - Rejeitar a validacao final se restarem usos da biblioteca de origem.
 - Registrar o motivo da aprovacao ou rejeicao em JSON.
@@ -100,6 +126,55 @@ Cada execucao deve preservar:
 - `logs/*_validation.json`
 - `logs/final_validation.json`
 - `prompts/*.md`
+
+## Projetos Reais em Benchmark
+
+O runner nao executa um clone Git arbitrario diretamente. Toda tarefa deve usar
+o formato auditavel:
+
+```text
+benchmark/<task_id>/
+  metadata.json
+  input_project/
+```
+
+Para importar um projeto GitHub real, use sempre:
+
+```bash
+python3 scripts/import_github_project.py <task_id> <repo_url>
+```
+
+Esse comando faz clone temporario, remove `.git`, copia o projeto para
+`input_project/` e cria `metadata.json`. Nao use apenas `git clone` dentro de
+`benchmark/` esperando que o runner reconheca automaticamente o projeto.
+
+Depois de importar, execute:
+
+```bash
+python3 scripts/run_task.py <task_id>
+```
+
+Se o baseline falhar antes da migracao, use a ferramenta separada de preparacao
+de benchmark. Ela nao pertence aos escopos diagnosis, migration ou validation e
+nao deve migrar bibliotecas:
+
+```bash
+python3 scripts/prepare_benchmark_project.py <task_id>
+python3 scripts/prepare_benchmark_project.py <task_id> --apply
+```
+
+O modo sem `--apply` apenas registra propostas em
+`benchmark/<task_id>/preparation/preparation_report.json`. O modo `--apply`
+pode executar correcoes basicas e auditaveis de baseline, como ajustar
+`pytest.ini` de `test` para `tests` quando a pasta existe, ou criar um loader
+YAML `load_config` quando os testes importam explicitamente
+`<pacote>.config.load_config` e o modulo esta ausente.
+
+Essa preparacao deve ser usada apenas para tornar o projeto original testavel
+antes da migracao. Nao esconda falhas de migracao nessa etapa.
+
+`benchmark/` e ignorado pelo git para evitar versionar clones externos e
+benchmarks locais gerados durante experimentos.
 
 ## Diretrizes para Evolucao
 

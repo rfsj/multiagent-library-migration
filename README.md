@@ -59,6 +59,72 @@ make docker-run
 
 Os resultados são gravados em `experiments/runs/`.
 
+## Importar Projeto Real
+
+Para testar um projeto pandas externo, use o importador em vez de fazer apenas
+`git clone` dentro de `benchmark/`. O runner espera sempre a estrutura
+`benchmark/<task_id>/metadata.json` e `benchmark/<task_id>/input_project/`.
+
+```bash
+python3 scripts/import_github_project.py \
+  task_meu_projeto \
+  https://github.com/usuario/repositorio
+```
+
+Opcionalmente:
+
+```bash
+python3 scripts/import_github_project.py \
+  task_meu_projeto \
+  https://github.com/usuario/repositorio \
+  --branch main \
+  --source-library pandas \
+  --target-library polars \
+  --overwrite
+```
+
+O comando faz clone temporario, remove metadados `.git`, cria `metadata.json` e
+copia o projeto para `input_project/`. Depois rode:
+
+```bash
+python3 scripts/run_task.py task_meu_projeto
+```
+
+Se o baseline do projeto importado falhar antes da migracao, nao corrija isso
+dentro dos agentes de migration. Use a etapa separada de preparacao:
+
+```bash
+python3 scripts/prepare_benchmark_project.py task_meu_projeto
+```
+
+Por padrao ela roda em modo `dry_run`, registra
+`benchmark/<task_id>/preparation/preparation_report.json` e lista correcoes
+seguras. Para aplicar:
+
+```bash
+python3 scripts/prepare_benchmark_project.py task_meu_projeto --apply
+```
+
+Essa ferramenta e pre-migracao: ela pode corrigir problemas basicos de baseline,
+como `pytest.ini` apontando para `test` quando a pasta real e `tests`, ou um
+loader YAML de configuracao ausente quando os testes esperam explicitamente
+`<pacote>.config.load_config`. Ela nao deve fazer migracao de biblioteca.
+
+Tambem ha um atalho via `make`:
+
+```bash
+make import-github TASK_ID=task_meu_projeto REPO_URL=https://github.com/usuario/repositorio
+```
+
+E para aplicar preparacao de benchmark:
+
+```bash
+make prepare-benchmark TASK_ID=task_meu_projeto
+```
+
+`benchmark/` e ignorado pelo git para evitar versionar projetos externos e
+benchmarks gerados localmente.
+
 ## Estrutura
 
 ```text
