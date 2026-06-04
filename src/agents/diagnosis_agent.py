@@ -32,7 +32,31 @@ Analyze the project below and produce a migration plan from \
 - Production files requiring migration: {affected_source_files}
 - Test files that use {source_library} for fixtures/assertions: {test_files_with_source_library_usage}
 
+## DataFrame flow analysis
+
+{dataframe_flow}
+
 {replan_context}
+"""
+
+_FLOW_HUMAN_TEMPLATE = """\
+Analyze DataFrame flow before planning a migration from {source_library} to \
+{target_library}.
+
+Focus on functions/classes that create, return, receive, or transform DataFrame-like
+objects. Identify producer/consumer relationships across files and mark groups that
+must be migrated together or at file level to preserve type consistency.
+Produce only the DataFrame flow analysis; do not produce migration steps in this
+stage.
+
+## Source files with {source_library} usage
+
+{file_contents}
+
+## Structural metadata
+
+- Production files requiring migration: {affected_source_files}
+- Dependency files: {dependency_files}
 """
 
 
@@ -46,6 +70,10 @@ class MigrationStep(BaseModel):
     )
     file: str = Field(
         description="File path relative to the repository root."
+    )
+    files: list[str] = Field(
+        default_factory=list,
+        description="Optional grouped files to migrate atomically in this step.",
     )
     description: str = Field(
         description="Human-readable summary of the migration intent for this file."
@@ -67,6 +95,52 @@ class MigrationStep(BaseModel):
         default="planned",
         description="Always 'planned'.",
     )
+
+
+class DataFrameFlowSymbol(BaseModel):
+    file: str = Field(description="File path relative to the repository root.")
+    symbol: str = Field(description="Function or class name.")
+    role: str = Field(
+        description=(
+            "Flow role such as producer, consumer, transformer, mixed, or unknown."
+        )
+    )
+    returns_dataframe: bool = Field(
+        default=False,
+        description="Whether this symbol appears to return a DataFrame-like object.",
+    )
+    consumes_dataframe_from: list[str] = Field(
+        default_factory=list,
+        description="Symbols this symbol depends on for DataFrame-like inputs.",
+    )
+    type_contract: str = Field(
+        default="unknown",
+        description="Expected DataFrame type contract before migration.",
+    )
+
+
+class DataFrameFlowGroup(BaseModel):
+    group_id: str = Field(description="Stable identifier such as flow_group_001.")
+    files: list[str] = Field(
+        description="Files that should be planned as a coupled migration group."
+    )
+    symbols: list[str] = Field(
+        default_factory=list,
+        description="Symbols involved in the coupled DataFrame flow.",
+    )
+    reason: str = Field(description="Why this flow is coupled.")
+    planning_strategy: str = Field(
+        description=(
+            "Recommended planning strategy, for example file_level_steps or "
+            "grouped_before_consumers."
+        )
+    )
+
+
+class DataFrameFlowAnalysis(BaseModel):
+    symbols: list[DataFrameFlowSymbol] = Field(default_factory=list)
+    groups: list[DataFrameFlowGroup] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class DiagnosisPlan(BaseModel):
@@ -100,6 +174,7 @@ class DiagnosisAgent:
         system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v1.md").read_text(encoding="utf-8")
 
         llm = get_llm().with_structured_output(DiagnosisPlan)
+        flow_llm = get_llm().with_structured_output(DataFrameFlowAnalysis)
 
         self._chain = (
             ChatPromptTemplate.from_messages([
@@ -107,6 +182,13 @@ class DiagnosisAgent:
                 ("human", _HUMAN_TEMPLATE),
             ])
             | llm
+        )
+        self._flow_chain = (
+            ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("human", _FLOW_HUMAN_TEMPLATE),
+            ])
+            | flow_llm
         )
 
     def run(
@@ -126,17 +208,36 @@ class DiagnosisAgent:
             json.dumps(audit, indent=2), encoding="utf-8"
         )
 
-        result: DiagnosisPlan = self._chain.invoke({
+        file_contents = self._collect_file_contents(project_dir, scan["affected_source_files"])
+        dataframe_flow: DataFrameFlowAnalysis = self._flow_chain.invoke({
             "source_library": source_library,
             "target_library": target_library,
-            "file_contents": self._collect_file_contents(project_dir, scan["affected_source_files"]),
+            "file_contents": file_contents,
             "dependency_files": scan["dependency_files"],
-            "dependency_summary": json.dumps(audit["dependency_summary"], indent=2, sort_keys=True),
-            "test_files": scan["test_files"],
             "affected_source_files": scan["affected_source_files"],
-            "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
-            "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
         })
+        flow_log_name = "dataframe_flow_analysis.json" if replan_attempt == 0 else f"dataframe_flow_analysis_replan_{replan_attempt}.json"
+        dataframe_flow_payload = dataframe_flow.model_dump()
+        (logs_dir / flow_log_name).write_text(
+            json.dumps(dataframe_flow_payload, indent=2), encoding="utf-8"
+        )
+
+        result = self._invoke_plan_with_retry(
+            logs_dir,
+            replan_attempt,
+            {
+                "source_library": source_library,
+                "target_library": target_library,
+                "file_contents": file_contents,
+                "dependency_files": scan["dependency_files"],
+                "dependency_summary": json.dumps(audit["dependency_summary"], indent=2, sort_keys=True),
+                "test_files": scan["test_files"],
+                "affected_source_files": scan["affected_source_files"],
+                "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
+                "dataframe_flow": json.dumps(dataframe_flow_payload, indent=2, sort_keys=True),
+                "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
+            },
+        )
         migration_steps, planner_warnings = self._sanitize_migration_steps(
             result.migration_steps,
             scan["affected_source_files"],
@@ -144,6 +245,7 @@ class DiagnosisAgent:
             audit["dependency_summary"],
             project_dir,
             source_library,
+            dataframe_flow_payload,
         )
 
         plan = {
@@ -158,6 +260,7 @@ class DiagnosisAgent:
             "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
+            "dataframe_flow_analysis": dataframe_flow_payload,
             "planner_warnings": planner_warnings,
             "migration_steps": migration_steps,
         }
@@ -177,6 +280,59 @@ class DiagnosisAgent:
             parts.append(f"### {rel_path}\n```python\n{content}\n```")
         return "\n\n".join(parts)
 
+    def _invoke_plan_with_retry(
+        self,
+        logs_dir: Path,
+        replan_attempt: int,
+        payload: dict[str, Any],
+    ) -> DiagnosisPlan:
+        attempts = []
+        for attempt in range(1, 3):
+            result = self._chain.invoke(payload)
+            if result is not None:
+                if attempts:
+                    attempts.append({"attempt": attempt, "status": "success"})
+                    self._write_planner_retry_log(logs_dir, replan_attempt, attempts)
+                return result
+            attempts.append(
+                {
+                    "attempt": attempt,
+                    "status": "empty_structured_output",
+                    "action": "retry" if attempt == 1 else "fail",
+                }
+            )
+            payload = {
+                **payload,
+                "replan_context": (
+                    f"{payload.get('replan_context', '')}\n\n"
+                    "The previous structured planner call returned no object. "
+                    "Return a valid DiagnosisPlan object with migration_steps."
+                ).strip(),
+            }
+        self._write_planner_retry_log(logs_dir, replan_attempt, attempts)
+        raise RuntimeError(
+            "DiagnosisAgent could not obtain a structured migration plan after retry."
+        )
+
+    def _write_planner_retry_log(
+        self,
+        logs_dir: Path,
+        replan_attempt: int,
+        attempts: list[dict[str, Any]],
+    ) -> None:
+        suffix = "" if replan_attempt == 0 else f"_replan_{replan_attempt}"
+        (logs_dir / f"diagnosis_plan_retry{suffix}.json").write_text(
+            json.dumps(
+                {
+                    "agent": self.name,
+                    "event": "structured_plan_retry",
+                    "attempts": attempts,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     def _sanitize_migration_steps(
         self,
         steps: list[MigrationStep],
@@ -185,6 +341,7 @@ class DiagnosisAgent:
         dependency_summary: dict[str, Any],
         project_dir: Path,
         source_library: str,
+        dataframe_flow: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         allowed_targets = set(affected_source_files) | set(dependency_files)
         allowed_scope = allowed_targets
@@ -219,6 +376,12 @@ class DiagnosisAgent:
                 )
             sanitized.append(payload)
         sanitized = _deduplicate_migration_steps(sanitized, warnings)
+        sanitized = _group_cross_file_flow_steps(
+            sanitized,
+            dataframe_flow or {},
+            dependency_files,
+            warnings,
+        )
         sanitized = self._split_file_steps_by_symbol(
             project_dir,
             sanitized,
@@ -226,6 +389,7 @@ class DiagnosisAgent:
             dependency_summary,
             dependency_files,
             warnings,
+            dataframe_flow or {},
         )
         if (
             sanitized
@@ -248,11 +412,33 @@ class DiagnosisAgent:
         dependency_summary: dict[str, Any],
         dependency_files: list[str],
         warnings: list[str],
+        dataframe_flow: dict[str, Any],
     ) -> list[dict[str, Any]]:
         split_steps: list[dict[str, Any]] = []
         next_index = 1
+        file_level_flow_files = _file_level_flow_files(dataframe_flow)
         for step in steps:
+            if step.get("files"):
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                cloned["allowed_symbols"] = []
+                split_steps.append(cloned)
+                next_index += 1
+                continue
+
             rel_file = step["file"]
+            if rel_file in file_level_flow_files:
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                cloned["allowed_symbols"] = []
+                split_steps.append(cloned)
+                next_index += 1
+                warnings.append(
+                    f"Kept {rel_file} as a file-level step because DataFrame "
+                    "flow analysis marked it as coupled with other migration targets."
+                )
+                continue
+
             if rel_file.endswith(".py") and _should_keep_file_level_step(
                 project_dir / rel_file, source_library
             ):
@@ -428,6 +614,125 @@ def _merge_step_group(
     merged["allowed_files"] = allowed_files
     merged["allowed_symbols"] = []
     return merged
+
+
+def _group_cross_file_flow_steps(
+    steps: list[dict[str, Any]],
+    dataframe_flow: dict[str, Any],
+    dependency_files: list[str],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    grouped_files = _grouped_flow_files(dataframe_flow)
+    if not grouped_files:
+        return steps
+
+    step_by_file = {step["file"]: step for step in steps}
+    used_files: set[str] = set()
+    grouped_steps: list[dict[str, Any]] = []
+    for files, reason in grouped_files:
+        present_files = [file for file in files if file in step_by_file]
+        if len(present_files) <= 1:
+            continue
+        primary = dict(step_by_file[present_files[0]])
+        allowed_files: list[str] = []
+        for rel_file in present_files:
+            for allowed in step_by_file[rel_file].get("allowed_files", []):
+                if allowed not in allowed_files:
+                    allowed_files.append(allowed)
+            if rel_file not in allowed_files:
+                allowed_files.append(rel_file)
+        for dependency_file in dependency_files:
+            if dependency_file not in allowed_files:
+                allowed_files.append(dependency_file)
+        primary["file"] = present_files[0]
+        primary["files"] = present_files
+        primary["allowed_files"] = allowed_files
+        primary["allowed_symbols"] = []
+        primary["description"] = (
+            "Migrate coupled DataFrame flow across files: "
+            + ", ".join(present_files)
+            + f". Reason: {reason}"
+        )
+        grouped_steps.append(primary)
+        used_files.update(present_files)
+        warnings.append(
+            "Grouped DataFrame flow files into one migration step: "
+            + ", ".join(present_files)
+        )
+
+    if not grouped_steps:
+        return steps
+
+    result: list[dict[str, Any]] = []
+    inserted_groups: set[tuple[str, ...]] = set()
+    for step in steps:
+        rel_file = step["file"]
+        matching_group = next(
+            (
+                grouped
+                for grouped in grouped_steps
+                if rel_file in grouped.get("files", [])
+            ),
+            None,
+        )
+        if matching_group:
+            key = tuple(matching_group["files"])
+            if key not in inserted_groups:
+                result.append(matching_group)
+                inserted_groups.add(key)
+            continue
+        if rel_file not in used_files:
+            result.append(step)
+    return result
+
+
+def _grouped_flow_files(dataframe_flow: dict[str, Any]) -> list[tuple[list[str], str]]:
+    groups: list[tuple[list[str], str]] = []
+    for group in dataframe_flow.get("groups", []):
+        if group.get("planning_strategy") != "grouped_before_consumers":
+            continue
+        files = [
+            file
+            for file in group.get("files", [])
+            if isinstance(file, str) and file.endswith(".py")
+        ]
+        unique_files = list(dict.fromkeys(files))
+        if len(unique_files) > 1:
+            groups.append((unique_files, str(group.get("reason", ""))))
+    return groups
+
+
+def _file_level_flow_files(dataframe_flow: dict[str, Any]) -> set[str]:
+    files: set[str] = set()
+    for group in dataframe_flow.get("groups", []):
+        strategy = group.get("planning_strategy", "")
+        group_files = [file for file in group.get("files", []) if file.endswith(".py")]
+        if len(group_files) <= 1:
+            continue
+        if strategy in {"file_level_steps", "grouped_before_consumers"}:
+            files.update(group_files)
+    files.update(_cross_file_dataframe_flow_files(dataframe_flow))
+    return files
+
+
+def _cross_file_dataframe_flow_files(dataframe_flow: dict[str, Any]) -> set[str]:
+    symbols = dataframe_flow.get("symbols", [])
+    symbol_to_file = {
+        symbol.get("symbol"): symbol.get("file")
+        for symbol in symbols
+        if symbol.get("symbol") and symbol.get("file")
+    }
+    coupled_files: set[str] = set()
+    for symbol in symbols:
+        consumer_file = symbol.get("file")
+        if not consumer_file:
+            continue
+        for producer_symbol in symbol.get("consumes_dataframe_from", []):
+            producer_file = symbol_to_file.get(producer_symbol)
+            if not producer_file or producer_file == consumer_file:
+                continue
+            coupled_files.update({producer_file, consumer_file})
+    return {file for file in coupled_files if file.endswith(".py")}
 
 
 def _top_level_symbol_names(path: Path) -> set[str]:

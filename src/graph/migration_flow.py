@@ -27,6 +27,7 @@ def select_next_step(graph_state: GraphState) -> dict[str, Any]:
     step = dict(migration_steps[step_index])
     step["source_library"] = diagnosis.get("source_library")
     step["target_library"] = diagnosis.get("target_library")
+    step["dataframe_flow_analysis"] = diagnosis.get("dataframe_flow_analysis", {})
     retry_feedback = graph_state["retry_counts"].get(step["step_id"])
     if retry_feedback and graph_state["current_step"] and graph_state["current_step"].get("retry_feedback"):
         step["retry_feedback"] = graph_state["current_step"]["retry_feedback"]

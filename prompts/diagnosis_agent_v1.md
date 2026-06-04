@@ -18,10 +18,21 @@ read-only mode — you must never suggest modifying files directly.
   - `low`: only straightforward API equivalents (read, filter, select, sort).
   - `medium`: moderate usage patterns that require attention.
   - `high`: complex usage, custom extensions, or unclear equivalents.
+- Analyze DataFrame flow before planning edits:
+  - identify functions/classes that create, return, receive, or transform
+    DataFrame-like objects;
+  - record producer/consumer relationships across affected files;
+  - mark coupled groups when downstream functions depend on DataFrames returned
+    by upstream functions, including cross-file groups that contain both the
+    producer file and all affected consumer files;
+  - prefer file-level or grouped-before-consumer planning when symbol-level
+    migration would mix source-library and target-library DataFrame types.
 - Produce one `migration_step` per affected file, ordered by dependency
   (independent files first). For larger files with multiple independent
   functions or classes using the source library, prefer symbol-level steps with
-  `allowed_symbols` so partial success can be audited.
+  `allowed_symbols` so partial success can be audited. Do not split symbols
+  when DataFrame flow analysis says the symbols/files share a type contract that
+  must be migrated together.
 - Set `allowed_files` to the affected file only; include `requirements.txt` if
   the step requires a dependency change.
 
