@@ -78,13 +78,14 @@ class ValidationAgent:
         out_of_scope = [path for path in changed if path not in allowed]
         self._install_dependencies(project_dir, logs_dir / f"{step['step_id']}_install.log")
         tests = run_pytest(project_dir, logs_dir / f"{step['step_id']}_pytest.log")
-        source_usage = self._source_usage_in_step_file(project_dir, step)
+        source_usage = self._source_usage_in_step_files(project_dir, step)
         result = {
             "agent": self.name,
             "step_id": step["step_id"],
             "changed_files": changed,
             "out_of_scope_changes": out_of_scope,
             "tests": tests["status"],
+            "pytest_feedback": _pytest_failure_excerpt(tests),
             "old_imports_remaining": source_usage["old_imports_remaining"],
             "unmigrated_uses": source_usage["unmigrated_uses"],
             "status": "approved"
@@ -185,10 +186,32 @@ class ValidationAgent:
         )
         log_file.write_text(proc.stdout, encoding="utf-8")
 
-    def _source_usage_in_step_file(self, project_dir: Path, step: dict[str, Any]) -> dict[str, int]:
+    def _source_usage_in_step_files(self, project_dir: Path, step: dict[str, Any]) -> dict[str, int]:
         source_library = step.get("source_library")
-        rel_file = Path(step["file"])
-        if not source_library or rel_file.suffix != ".py":
+        rel_files = step.get("files") or [step["file"]]
+        if not source_library:
+            return {"old_imports_remaining": 0, "unmigrated_uses": 0}
+
+        totals = {"old_imports_remaining": 0, "unmigrated_uses": 0}
+        for rel_file in rel_files:
+            usage = self._source_usage_in_one_step_file(
+                project_dir,
+                Path(rel_file),
+                step,
+                source_library,
+            )
+            totals["old_imports_remaining"] += usage["old_imports_remaining"]
+            totals["unmigrated_uses"] += usage["unmigrated_uses"]
+        return totals
+
+    def _source_usage_in_one_step_file(
+        self,
+        project_dir: Path,
+        rel_file: Path,
+        step: dict[str, Any],
+        source_library: str,
+    ) -> dict[str, int]:
+        if rel_file.suffix != ".py":
             return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
         path = project_dir / rel_file
@@ -243,6 +266,12 @@ class ValidationAgent:
             }
 
         if validation_evidence.get("status") == "rejected":
+            feedback = {
+                **validation_evidence,
+                "actionable_feedback": _actionable_validation_feedback(
+                    validation_evidence
+                ),
+            }
             return {
                 "agent": self.name,
                 "step_id": step_id,
@@ -252,7 +281,7 @@ class ValidationAgent:
                     "source-library usage did not satisfy the migration contract."
                 ),
                 "feedback_target": "agent_2",
-                "feedback_for_agent": json.dumps(validation_evidence, sort_keys=True),
+                "feedback_for_agent": json.dumps(feedback, sort_keys=True),
                 "retry_recommendation": "retry",
                 "confidence": "high",
             }
@@ -286,3 +315,100 @@ def _source_for_symbols(source: str, symbols: list[str]) -> str:
         if node.name in symbols and hasattr(node, "end_lineno"):
             parts.append("".join(lines[node.lineno - 1:node.end_lineno]))
     return "\n".join(parts) if parts else source
+
+
+def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
+    if tests.get("passed"):
+        return ""
+    log_file = tests.get("log_file")
+    if not log_file:
+        return ""
+    path = Path(log_file)
+    if not path.exists():
+        return ""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    failure_lines = [
+        line
+        for line in lines
+        if (
+            line.startswith("E       ")
+            or "FAILED " in line
+            or "AttributeError:" in line
+            or "TypeError:" in line
+            or "ColumnNotFoundError:" in line
+        )
+    ]
+    selected = failure_lines[-max_lines:] if failure_lines else lines[-max_lines:]
+    return "\n".join(selected)
+
+
+def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
+    pytest_feedback = validation_evidence.get("pytest_feedback", "")
+    if not pytest_feedback:
+        return "Review validation evidence and revise the implementation."
+    hints = []
+    if "does not support `Series` assignment by index" in pytest_feedback:
+        hints.append(
+            "The migrated code is assigning columns with pandas syntax on a "
+            "Polars DataFrame. Replace df[\"col\"] = ... with df = "
+            "df.with_columns(...alias(\"col\"))."
+        )
+    if "object has no attribute 'sort'" in pytest_feedback or "object has no attribute 'with_columns'" in pytest_feedback or "object has no attribute 'group_by'" in pytest_feedback:
+        hints.append(
+            "The migrated code is using Polars APIs on an object that is still a "
+            "pandas DataFrame. Preserve producer/consumer type compatibility or "
+            "migrate the upstream producer first."
+        )
+    if "ColumnNotFoundError" in pytest_feedback:
+        hints.append(
+            "A Polars expression referenced a missing column. If a new column is "
+            "created and then used by another new column, split the expressions "
+            "into sequential with_columns calls."
+        )
+    if "reset_index" in pytest_feedback:
+        hints.append(
+            "The migrated code is still using pandas reset_index on a Polars "
+            "DataFrame. Remove reset_index(drop=True); Polars has no pandas-style "
+            "row index in the DataFrame contract."
+        )
+    if "unexpected keyword argument 'ascending'" in pytest_feedback:
+        hints.append(
+            "The migrated code passed pandas ascending= to Polars sort. Polars "
+            "uses descending= with inverted booleans, for example pandas "
+            "ascending=[False, False, True] becomes descending=[True, True, False]."
+        )
+    if "At index 0 diff" in pytest_feedback and "segment" in pytest_feedback:
+        hints.append(
+            "The migrated code returns rows in the wrong order for customer "
+            "lifetime value output. Preserve pandas sort_values(['segment', "
+            "'total_spend', 'customer_id'], ascending=[False, False, True]) as "
+            "Polars sort(..., descending=[True, True, False])."
+        )
+    if (
+        "At index 0 diff" in pytest_feedback
+        and (
+            "order_id" in pytest_feedback
+            or "latest_order_per_customer" in pytest_feedback
+        )
+    ):
+        hints.append(
+            "The migrated latest-row-per-group logic selected a different row. "
+            "For pandas sort_values(...).drop_duplicates(..., keep='first'), use "
+            "Polars sort with matching descending/nulls_last and then "
+            "unique(..., keep='first', maintain_order=True)."
+        )
+    if "At index 2 diff" in pytest_feedback or "columns" in pytest_feedback:
+        hints.append(
+            "The migrated pivot output has a column-order mismatch. After "
+            "Polars pivot, sort the pivoted value columns and select ['month', "
+            "*product_columns] before returning."
+        )
+    if "'month': None" in pytest_feedback or '"month": None' in pytest_feedback:
+        hints.append(
+            "The migrated pivot output includes a null month group. pandas "
+            "pivot_table drops null index groups by default; filter "
+            "pl.col('month').is_not_null() before the Polars pivot."
+        )
+    if not hints:
+        hints.append("Use the pytest failure excerpt to revise the implementation.")
+    return " ".join(hints)

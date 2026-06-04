@@ -1,8 +1,135 @@
 import json
+import re
+from types import SimpleNamespace
 
 import pytest
 
-from src.agents.migration_agent import MigrationAgent
+from src.agents.implementation_review_agent import ImplementationReviewAgent
+from src.agents.migration_agent import MigrationAgent, _retry_feedback_context
+from src.agents.validation_agent import _actionable_validation_feedback
+
+
+class FakeMigrationChain:
+    def __init__(self, migrated_versions):
+        self.migrated_versions = list(migrated_versions)
+        self.calls = []
+
+    def invoke(self, payload):
+        self.calls.append(payload)
+        return SimpleNamespace(migrated_code=self.migrated_versions.pop(0))
+
+
+class FakeImplementationReviewAgent:
+    def __init__(self):
+        self.calls = []
+
+    def review(
+        self,
+        *,
+        rel_file,
+        original_code,
+        migrated_code,
+        planned_step,
+        dataframe_flow_analysis,
+        logs_dir,
+        log_suffix="implementation_review",
+    ):
+        self.calls.append(
+            {
+                "rel_file": rel_file,
+                "migrated_code": migrated_code,
+                "log_suffix": log_suffix,
+            }
+        )
+        if len(self.calls) == 1:
+            return {
+                "agent": "implementation_review_agent",
+                "step_id": planned_step["step_id"],
+                "file": str(rel_file),
+                "status": "needs_revision",
+                "issues": [
+                    {
+                        "kind": "dependent_polars_columns",
+                        "file": str(rel_file),
+                        "symbol": "load",
+                        "explanation": "Column created and reused too early.",
+                    }
+                ],
+                "revision_instructions": "Split dependent expressions into sequential steps.",
+                "confidence": "high",
+            }
+        return {
+            "agent": "implementation_review_agent",
+            "step_id": planned_step["step_id"],
+            "file": str(rel_file),
+            "status": "approved",
+            "issues": [],
+            "revision_instructions": "",
+            "confidence": "high",
+        }
+
+
+class NoopImplementationReviewAgent:
+    def review(self, **kwargs):
+        return {
+            "agent": "implementation_review_agent",
+            "step_id": kwargs["planned_step"]["step_id"],
+            "file": str(kwargs["rel_file"]),
+            "status": "approved",
+            "issues": [],
+            "revision_instructions": "",
+            "confidence": "high",
+        }
+
+
+class RuleBasedMigrationChain:
+    def invoke(self, payload):
+        return SimpleNamespace(migrated_code=rule_based_migrate(payload["source_code"]))
+
+
+class FakeReviewChain:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def invoke(self, payload):
+        self.calls.append(payload)
+        return self.results.pop(0)
+
+
+def rule_based_migrate(source):
+    output = source
+    output = re.sub(r"^import pandas as pd$", "import polars as pl", output, flags=re.MULTILINE)
+    output = output.replace("pd.DataFrame(", "pl.DataFrame(")
+    output = output.replace("pd.Series(", "pl.Series(")
+    output = output.replace("pd.concat(", "pl.concat(")
+    output = output.replace("pd.read_csv(", "pl.read_csv(")
+    output = output.replace("pd.read_json(", "pl.read_json(")
+    output = output.replace('.to_dict("records")', ".to_dicts()")
+    output = output.replace(".to_dict('records')", ".to_dicts()")
+    output = re.sub(r"\.groupby\(", ".group_by(", output)
+    output = re.sub(r"\.drop_duplicates\(", ".unique(", output)
+    output = re.sub(r"\.sort_values\(", ".sort(", output)
+    output = re.sub(r"\.reset_index\(drop=True\)", "", output)
+    return output
+
+
+@pytest.fixture(autouse=True)
+def fake_migration_agent_llm(monkeypatch):
+    def fake_init(self, implementation_review_agent=None):
+        self._chain = RuleBasedMigrationChain()
+        self._implementation_review_agent = (
+            implementation_review_agent or NoopImplementationReviewAgent()
+        )
+
+    monkeypatch.setattr(MigrationAgent, "__init__", fake_init)
+
+
+def make_migration_agent_with_fakes(migrated_versions):
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain(migrated_versions)
+    agent._implementation_review_agent = FakeImplementationReviewAgent()
+    return agent
 
 
 def test_dependency_step_updates_only_requirements(tmp_path):
@@ -30,6 +157,55 @@ def test_dependency_step_updates_only_requirements(tmp_path):
     assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npytest==8.3.4\npolars\n"
     assert python_file.read_text(encoding="utf-8") == "import pandas as pd\n"
     assert json.loads((logs_dir / "step_001_migration.json").read_text(encoding="utf-8")) == result
+
+
+def test_validation_feedback_identifies_semantic_ordering_repairs():
+    feedback = _actionable_validation_feedback(
+        {
+            "pytest_feedback": (
+                "E       AssertionError: assert [{'customer_id': 'C999', "
+                "'segment': 'standard'}] == [{'customer_id': 'C002', "
+                "'segment': 'vip'}]\n"
+                "E         At index 0 diff: {'customer_id': 'C999', "
+                "'segment': 'standard'} != {'customer_id': 'C002', "
+                "'segment': 'vip'}\n"
+                "E       AssertionError: assert ['month', 'book', 'pen', "
+                "'desk'] == ['month', 'book', 'desk', 'pen']\n"
+                "E         At index 2 diff: 'pen' != 'desk'\n"
+                "E       AssertionError: assert [('C001', 1)] == [('C001', 3)]\n"
+                "E         At index 0 diff: ('C001', 1) != ('C001', 3)\n"
+                "FAILED tests/test_processing.py::test_latest_order_per_customer\n"
+                "E         At index 0 diff: {'month': None, 'book': 40.0} "
+                "!= {'month': '2025-01', 'book': 80.0}"
+            )
+        }
+    )
+
+    assert "descending=[True, True, False]" in feedback
+    assert "maintain_order=True" in feedback
+    assert "column-order mismatch" in feedback
+    assert "is_not_null" in feedback
+
+
+def test_migration_retry_context_includes_structured_repair_plan():
+    context = _retry_feedback_context(
+        {
+            "feedback_for_agent": "RepairAgent produced a repair plan.",
+            "repair_plan": {
+                "failure_category": "semantic_equivalence_error",
+                "instructions_for_migration_agent": ["Fix sort order."],
+                "acceptance_criteria": ["No sort call uses ascending=."],
+                "must_not_do": ["Do not use pandas APIs."],
+            },
+            "validation_feedback": "pytest failed",
+        }
+    )
+
+    assert "Structured Repair Plan" in context
+    assert "Mandatory Acceptance Criteria" in context
+    assert "No sort call uses ascending=." in context
+    assert "Forbidden Patterns For This Retry" in context
+    assert "Do not use pandas APIs." in context
 
 
 def test_python_step_does_not_update_requirements(tmp_path):
@@ -64,6 +240,96 @@ def test_python_step_does_not_update_requirements(tmp_path):
     assert "import polars as pl" in migrated
     assert "pl.read_csv(path)" in migrated
     assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npytest==8.3.4\n"
+
+
+def test_migration_agent_retries_missing_structured_output(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    python_file.write_text("import pandas as pd\n", encoding="utf-8")
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([None, "import polars as pl\n"])
+    agent._implementation_review_agent = NoopImplementationReviewAgent()
+
+    result = agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+
+    assert result["status"] == "completed"
+    assert result["structured_output_attempts"] == 2
+    assert len(agent._chain.calls) == 2
+    assert python_file.read_text(encoding="utf-8") == "import polars as pl\n"
+
+
+def test_migration_agent_records_no_change_when_structured_output_missing(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    original = "import pandas as pd\n"
+    python_file.write_text(original, encoding="utf-8")
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([None, None])
+    agent._implementation_review_agent = NoopImplementationReviewAgent()
+
+    result = agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+
+    log_payload = json.loads(
+        (logs_dir / "step_001_migration.json").read_text(encoding="utf-8")
+    )
+    assert result["status"] == "no_change"
+    assert result["structured_output_attempts"] == 2
+    assert "no structured output" in result["structured_output_error"]
+    assert log_payload["structured_output_error"] == result["structured_output_error"]
+    assert python_file.read_text(encoding="utf-8") == original
+
+
+def test_migration_agent_migrates_grouped_files_in_one_step(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    (source_dir / "loaders.py").write_text("import pandas as pd\n", encoding="utf-8")
+    (source_dir / "summaries.py").write_text("import pandas as pd\n", encoding="utf-8")
+
+    result = MigrationAgent().run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/loaders.py",
+            "files": ["src/loaders.py", "src/summaries.py"],
+            "allowed_files": ["src/loaders.py", "src/summaries.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+
+    assert result["status"] == "completed"
+    assert result["changed_files"] == ["src/loaders.py", "src/summaries.py"]
+    assert (source_dir / "loaders.py").read_text(encoding="utf-8") == "import polars as pl\n"
+    assert (source_dir / "summaries.py").read_text(encoding="utf-8") == "import polars as pl\n"
 
 
 def test_python_step_updates_requirements_when_allowed(tmp_path):
@@ -331,3 +597,167 @@ def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
     assert "import pandas as pd" not in migrated
     assert "import polars as pl" in migrated
     assert "pd." not in migrated
+
+
+def test_implementation_review_requests_second_migration_pass(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    python_file.write_text(
+        "import pandas as pd\n\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+    agent = make_migration_agent_with_fakes(
+        [
+            "import polars as pl\n\n\n"
+            "def load(path):\n"
+            "    return broken_polars_code(path)\n",
+            "import polars as pl\n\n\n"
+            "def load(path):\n"
+            "    return pl.read_csv(path)\n",
+        ]
+    )
+
+    result = agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+            "dataframe_flow_analysis": {
+                "symbols": [],
+                "groups": [],
+                "notes": [],
+            },
+        },
+        logs_dir,
+    )
+
+    assert result["status"] == "completed"
+    assert len(agent._chain.calls) == 2
+    assert "Implementation review requested a revision" in agent._chain.calls[1][
+        "retry_feedback_context"
+    ]
+    assert [
+        call["log_suffix"] for call in agent._implementation_review_agent.calls
+    ] == ["implementation_review", "implementation_review_after_revision"]
+    assert python_file.read_text(encoding="utf-8") == (
+        "import polars as pl\n\n\n"
+        "def load(path):\n"
+        "    return pl.read_csv(path)\n"
+    )
+
+
+def test_implementation_review_with_issues_cannot_be_approved():
+    agent = ImplementationReviewAgent.__new__(ImplementationReviewAgent)
+
+    payload = agent._normalize_review_payload(
+        {
+            "agent": "implementation_review_agent",
+            "step_id": "step_001",
+            "file": "src/example.py",
+            "status": "approved",
+            "issues": [
+                {
+                    "kind": "polars_assignment_by_index",
+                    "file": "src/example.py",
+                    "symbol": "load",
+                    "explanation": "Polars DataFrame uses pandas assignment syntax.",
+                }
+            ],
+            "revision_instructions": "",
+            "confidence": "high",
+        }
+    )
+
+    assert payload["status"] == "needs_revision"
+    assert "address every issue" in payload["revision_instructions"]
+
+
+def test_implementation_review_rejects_removed_public_symbols():
+    agent = ImplementationReviewAgent.__new__(ImplementationReviewAgent)
+
+    payload = agent._normalize_review_payload(
+        {
+            "agent": "implementation_review_agent",
+            "step_id": "step_001",
+            "file": "src/example.py",
+            "status": "approved",
+            "issues": [],
+            "revision_instructions": "",
+            "confidence": "high",
+        },
+        rel_file="src/example.py",
+        original_code=(
+            "def load(path):\n"
+            "    pass\n\n"
+            "def invalid_rows(path):\n"
+            "    pass\n"
+        ),
+        migrated_code=(
+            "def load(path):\n"
+            "    pass\n"
+        ),
+    )
+
+    assert payload["status"] == "needs_revision"
+    assert payload["issues"][0]["kind"] == "public_api_symbol_removed"
+    assert payload["issues"][0]["symbol"] == "invalid_rows"
+    assert "Missing symbols: invalid_rows" in payload["revision_instructions"]
+
+
+def test_implementation_review_retries_missing_structured_output(tmp_path):
+    agent = ImplementationReviewAgent.__new__(ImplementationReviewAgent)
+    agent._chain = FakeReviewChain(
+        [
+            None,
+            SimpleNamespace(
+                model_dump=lambda: {
+                    "status": "approved",
+                    "issues": [],
+                    "revision_instructions": "",
+                    "confidence": "high",
+                }
+            ),
+        ]
+    )
+
+    payload = agent.review(
+        rel_file=tmp_path / "src" / "example.py",
+        original_code="import pandas as pd\n",
+        migrated_code="import polars as pl\n",
+        planned_step={"step_id": "step_001"},
+        dataframe_flow_analysis={"symbols": [], "groups": [], "notes": []},
+        logs_dir=tmp_path / "logs",
+    )
+
+    assert payload["status"] == "approved"
+    assert payload["structured_output_attempts"] == 2
+    assert len(agent._chain.calls) == 2
+
+
+def test_implementation_review_falls_back_when_structured_output_missing(tmp_path):
+    agent = ImplementationReviewAgent.__new__(ImplementationReviewAgent)
+    agent._chain = FakeReviewChain([None, None])
+
+    payload = agent.review(
+        rel_file=tmp_path / "src" / "example.py",
+        original_code="import pandas as pd\n",
+        migrated_code="import polars as pl\n",
+        planned_step={"step_id": "step_001"},
+        dataframe_flow_analysis={"symbols": [], "groups": [], "notes": []},
+        logs_dir=tmp_path / "logs",
+    )
+
+    assert payload["status"] == "needs_revision"
+    assert payload["confidence"] == "low"
+    assert payload["structured_output_attempts"] == 2
+    assert payload["issues"][0]["kind"] == "structured_output_missing"
+    assert "did not return structured output" in payload["revision_instructions"]
+    assert (tmp_path / "logs" / "step_001_implementation_review.json").exists()
