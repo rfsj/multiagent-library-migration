@@ -97,7 +97,7 @@ class RepairAgent:
         if target.exists() and target.is_file():
             migrated_code = target.read_text(encoding="utf-8")
 
-        result: RepairPlan = self._chain.invoke(
+        result: RepairPlan | None = self._chain.invoke(
             {
                 "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
                 "migration_result": json.dumps(
@@ -109,15 +109,53 @@ class RepairAgent:
                 "migrated_code": migrated_code,
             }
         )
+        repair_payload = (
+            result.model_dump()
+            if result is not None
+            else _fallback_repair_payload(validation_evidence)
+        )
         payload = {
             "agent": self.name,
             "step_id": planned_step["step_id"],
             "file": str(rel_file),
             "attempt": attempt,
-            **result.model_dump(),
+            **repair_payload,
         }
         logs_dir.mkdir(parents=True, exist_ok=True)
         (logs_dir / f"{planned_step['step_id']}_repair_{attempt:02d}.json").write_text(
             json.dumps(payload, indent=2), encoding="utf-8"
         )
         return payload
+
+
+def _fallback_repair_payload(validation_evidence: dict[str, Any]) -> dict[str, Any]:
+    actionable_feedback = validation_evidence.get("actionable_feedback") or (
+        "Review the pytest failure excerpt and revise the implementation inside "
+        "the planned scope."
+    )
+    pytest_feedback = validation_evidence.get("pytest_feedback")
+    instructions = [str(actionable_feedback)]
+    if pytest_feedback:
+        instructions.append(
+            "Use the pytest failure excerpt to identify every semantic or API "
+            "mismatch still present in the migrated code."
+        )
+    return {
+        "failure_category": "unknown",
+        "root_cause": (
+            "The RepairAgent LLM did not return a structured repair plan; "
+            "falling back to validation evidence."
+        ),
+        "repair_strategy": "fallback_to_validation_feedback",
+        "instructions_for_migration_agent": instructions,
+        "acceptance_criteria": [
+            "The next migration retry addresses the validation feedback.",
+            "The planned tests pass without out-of-scope changes.",
+        ],
+        "must_not_do": [
+            "Do not edit files outside allowed_files.",
+            "Do not change tests to make the migration pass.",
+            "Do not introduce benchmark-specific hardcoded values.",
+        ],
+        "confidence": "low",
+    }

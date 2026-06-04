@@ -115,7 +115,8 @@ priority instruction for this retry. Before returning code:
 - `.groupby(col)` → `.group_by(col)`
 - `.agg({{"col": "mean"}})` → `.agg(pl.col("col").mean())`
 - pandas named aggregation
-  `orders=("order_id", "nunique")` → `pl.col("order_id").n_unique().alias("orders")`
+  `output_unique=("<id_col>", "nunique")` →
+  `pl.col("<id_col>").n_unique().alias("output_unique")`
 - Do not use deprecated `pl.count()` for pandas `nunique`; use
   `pl.col("col").n_unique()`.
 
@@ -127,11 +128,12 @@ priority instruction for this retry. Before returning code:
   `.fill_null(value)` after the pivot.
 - pandas pivot output columns are often expected in sorted label order. After a
   pivot, explicitly order columns when tests compare exact column order:
-  `product_columns = sorted([c for c in matrix.columns if c != "month"])`
-  followed by `matrix.select(["month", *product_columns])`.
+  `index_columns = ["<index_col>"]`,
+  `pivot_value_columns = sorted([c for c in matrix.columns if c not in index_columns])`,
+  followed by `matrix.select([*index_columns, *pivot_value_columns])`.
 - pandas `pivot_table` drops rows where the pivot index is null by default.
-  When migrating a pivot by month after date parsing, filter null months before
-  pivoting: `.filter(pl.col("month").is_not_null())`.
+  When migrating a pivot whose index column may contain null values, filter null
+  index values before pivoting: `.filter(pl.col("<index_col>").is_not_null())`.
 
 ### String Operations
 - `.str.lower()` → `.str.to_lowercase()`
@@ -153,76 +155,79 @@ priority instruction for this retry. Before returning code:
 - Example:
 
 ```python
-# WRONG: net_revenue references gross_revenue created in the same call
-orders = orders.with_columns([
-    (pl.col("quantity") * pl.col("unit_price")).alias("gross_revenue"),
-    (pl.col("gross_revenue") * (1 - pl.col("discount"))).alias("net_revenue"),
+# WRONG: <derived_col_2> references <derived_col_1> created in the same call
+frame = frame.with_columns([
+    (pl.col("<input_col_a>") * pl.col("<input_col_b>")).alias("<derived_col_1>"),
+    (pl.col("<derived_col_1>") + pl.col("<input_col_c>")).alias("<derived_col_2>"),
 ])
 
-# RIGHT: create gross_revenue first, then use it
-orders = orders.with_columns(
-    (pl.col("quantity") * pl.col("unit_price")).alias("gross_revenue")
+# RIGHT: create <derived_col_1> first, then use it
+frame = frame.with_columns(
+    (pl.col("<input_col_a>") * pl.col("<input_col_b>")).alias("<derived_col_1>")
 )
-orders = orders.with_columns(
-    (pl.col("gross_revenue") * (1 - pl.col("discount"))).alias("net_revenue")
+frame = frame.with_columns(
+    (pl.col("<derived_col_1>") + pl.col("<input_col_c>")).alias("<derived_col_2>")
 )
 ```
 
-## Real-World Migration Examples
+## General Migration Templates
 
 ### Example 1: DataFrame Loading & Filtering
 ```python
 # BEFORE (pandas)
-def load_orders(path: str):
-    orders = pd.read_csv(path)
-    orders["order_date"] = pd.to_datetime(orders["order_date"], errors="coerce")
-    orders["discount"] = orders["discount"].fillna(0.0)
-    return orders[orders["status"] == "paid"]
+def load_frame(path: str):
+    frame = pd.read_csv(path)
+    frame["<date_col>"] = pd.to_datetime(frame["<date_col>"], errors="coerce")
+    frame["<nullable_col>"] = frame["<nullable_col>"].fillna(<fill_value>)
+    return frame[frame["<category_col>"] == "<target_value>"]
 
 # AFTER (polars)
-def load_orders(path: str):
-    orders = pl.read_csv(path)
-    orders = orders.with_columns([
-        pl.col("order_date").str.to_date(strict=False),
-        pl.col("discount").fill_null(0.0)
+def load_frame(path: str):
+    frame = pl.read_csv(path)
+    frame = frame.with_columns([
+        pl.col("<date_col>").str.to_date(strict=False),
+        pl.col("<nullable_col>").fill_null(<fill_value>)
     ])
-    return orders.filter(pl.col("status") == "paid")
+    return frame.filter(pl.col("<category_col>") == "<target_value>")
 ```
 
 ### Example 1b: Loader With Dependent Columns
 ```python
 # BEFORE (pandas)
-def load_orders(path: str):
-    orders = pd.read_csv(path)
-    orders["order_date"] = pd.to_datetime(orders["order_date"], errors="coerce")
-    orders["discount"] = orders["discount"].fillna(0.0)
-    orders["gross_revenue"] = orders["quantity"] * orders["unit_price"]
-    orders["net_revenue"] = orders["gross_revenue"] * (1 - orders["discount"])
-    return orders.sort_values(["order_date", "order_id"]).reset_index(drop=True)
+def load_frame(path: str):
+    frame = pd.read_csv(path)
+    frame["<date_col>"] = pd.to_datetime(frame["<date_col>"], errors="coerce")
+    frame["<nullable_col>"] = frame["<nullable_col>"].fillna(<fill_value>)
+    frame["<derived_col_1>"] = frame["<input_col_a>"] * frame["<input_col_b>"]
+    frame["<derived_col_2>"] = frame["<derived_col_1>"] + frame["<input_col_c>"]
+    return frame.sort_values(["<sort_col>", "<tie_breaker_col>"]).reset_index(drop=True)
 
 # AFTER (polars)
-def load_orders(path: str):
-    orders = pl.read_csv(path)
-    orders = orders.with_columns([
-        pl.col("order_date").str.to_date(strict=False),
-        pl.col("discount").fill_null(0.0),
+def load_frame(path: str):
+    frame = pl.read_csv(path)
+    frame = frame.with_columns([
+        pl.col("<date_col>").str.to_date(strict=False),
+        pl.col("<nullable_col>").fill_null(<fill_value>),
     ])
-    orders = orders.with_columns(
-        (pl.col("quantity") * pl.col("unit_price")).alias("gross_revenue")
+    frame = frame.with_columns(
+        (pl.col("<input_col_a>") * pl.col("<input_col_b>")).alias("<derived_col_1>")
     )
-    orders = orders.with_columns(
-        (pl.col("gross_revenue") * (1 - pl.col("discount"))).alias("net_revenue")
+    frame = frame.with_columns(
+        (pl.col("<derived_col_1>") + pl.col("<input_col_c>")).alias("<derived_col_2>")
     )
-    return orders.sort(["order_date", "order_id"], nulls_last=True)
+    return frame.sort(["<sort_col>", "<tie_breaker_col>"], nulls_last=True)
 ```
 
 ### Example 2: Sorting & Aggregation
 ```python
 # BEFORE (pandas)
-result = df.sort_values(["age", "name"], ascending=[True, False]).reset_index(drop=True)
+result = df.sort_values(
+    ["<sort_col>", "<tie_breaker_col>"],
+    ascending=[True, False],
+).reset_index(drop=True)
 
 # AFTER (polars)
-result = df.sort(["age", "name"], descending=[False, True])
+result = df.sort(["<sort_col>", "<tie_breaker_col>"], descending=[False, True])
 # Note: NO reset_index in polars - it's implicit
 ```
 
@@ -230,77 +235,71 @@ result = df.sort(["age", "name"], descending=[False, True])
 ```python
 # BEFORE (pandas)
 result = (
-    paid.groupby("region", as_index=False)
+    frame.groupby("<group_key>", as_index=False)
     .agg(
-        total_revenue=("net_revenue", "sum"),
-        orders=("order_id", "nunique"),
-        average_order_value=("net_revenue", "mean"),
+        output_sum=("<value_col>", "sum"),
+        output_unique=("<id_col>", "nunique"),
+        output_mean=("<value_col>", "mean"),
     )
-    .sort_values(["total_revenue", "region"], ascending=[False, True])
+    .sort_values(["output_sum", "<group_key>"], ascending=[False, True])
     .reset_index(drop=True)
 )
-result["total_revenue"] = result["total_revenue"].round(2)
-result["average_order_value"] = result["average_order_value"].round(2)
+result["output_sum"] = result["output_sum"].round(2)
+result["output_mean"] = result["output_mean"].round(2)
 
 # AFTER (polars)
 result = (
-    paid.group_by("region")
+    frame.group_by("<group_key>")
     .agg([
-        pl.col("net_revenue").sum().alias("total_revenue"),
-        pl.col("order_id").n_unique().alias("orders"),
-        pl.col("net_revenue").mean().alias("average_order_value"),
+        pl.col("<value_col>").sum().alias("output_sum"),
+        pl.col("<id_col>").n_unique().alias("output_unique"),
+        pl.col("<value_col>").mean().alias("output_mean"),
     ])
     .with_columns([
-        pl.col("total_revenue").round(2),
-        pl.col("average_order_value").round(2),
+        pl.col("output_sum").round(2),
+        pl.col("output_mean").round(2),
     ])
-    .sort(["total_revenue", "region"], descending=[True, False])
+    .sort(["output_sum", "<group_key>"], descending=[True, False])
 )
 ```
 
-### Example 5: Pivot Table
+### Example 5: Pivot Table Template
 ```python
 # BEFORE (pandas)
 matrix = pd.pivot_table(
-    paid,
-    values="net_revenue",
-    index="month",
-    columns="product",
+    frame,
+    values="<value_col>",
+    index="<index_col>",
+    columns="<pivot_col>",
     aggfunc="sum",
-    fill_value=0.0,
+    fill_value=<fill_value>,
 )
 
 # AFTER (polars 1.17.x)
-matrix = paid.pivot(
-    values="net_revenue",
-    index="month",
-    on="product",
+matrix = frame.pivot(
+    values="<value_col>",
+    index="<index_col>",
+    on="<pivot_col>",
     aggregate_function="sum",
-).fill_null(0.0)
-product_columns = sorted([column for column in matrix.columns if column != "month"])
-matrix = matrix.select(["month", *product_columns]).sort("month")
+).fill_null(<fill_value>)
+index_columns = ["<index_col>"]
+pivot_value_columns = sorted([
+    column for column in matrix.columns if column not in index_columns
+])
+matrix = matrix.select([*index_columns, *pivot_value_columns]).sort(index_columns)
 ```
 
-### Example 6: Customer Lifetime Value Sort
+### Example 6: Multi-Column Semantic Sort Template
 ```python
 # BEFORE (pandas)
-result["segment"] = result["total_spend"].apply(
-    lambda value: "vip" if value >= 250 else "standard"
-)
 return result.sort_values(
-    ["segment", "total_spend", "customer_id"],
+    ["<primary_sort_col>", "<metric_col>", "<tie_breaker_col>"],
     ascending=[False, False, True],
 ).reset_index(drop=True)
 
 # AFTER (polars)
-result = result.with_columns(
-    pl.when(pl.col("total_spend") >= 250)
-    .then(pl.lit("vip"))
-    .otherwise(pl.lit("standard"))
-    .alias("segment")
-)
 return result.sort(
-    ["segment", "total_spend", "customer_id"],
+    ["<primary_sort_col>", "<metric_col>", "<tie_breaker_col>"],
     descending=[True, True, False],
 )
 ```
@@ -309,19 +308,19 @@ return result.sort(
 ```python
 # BEFORE (pandas)
 ordered = df.sort_values(
-    ["customer_id", "order_date", "order_id"],
+    ["<group_key>", "<sort_col>", "<tie_breaker_col>"],
     ascending=[True, False, False],
 )
-latest = ordered.drop_duplicates(subset=["customer_id"], keep="first")
+latest = ordered.drop_duplicates(subset=["<group_key>"], keep="first")
 
 # AFTER (polars)
 ordered = df.sort(
-    ["customer_id", "order_date", "order_id"],
+    ["<group_key>", "<sort_col>", "<tie_breaker_col>"],
     descending=[False, True, True],
     nulls_last=True,
 )
 latest = ordered.unique(
-    subset=["customer_id"],
+    subset=["<group_key>"],
     keep="first",
     maintain_order=True,
 )
@@ -330,10 +329,14 @@ latest = ordered.unique(
 ### Example 3: Column Selection & Filtering
 ```python
 # BEFORE (pandas)
-filtered = df[df["price"] > 100][["id", "name", "price"]].sort_values("id")
+filtered = df[df["<metric_col>"] > <threshold>][
+    ["<id_col>", "<label_col>", "<metric_col>"]
+].sort_values("<id_col>")
 
 # AFTER (polars)
-filtered = df.filter(pl.col("price") > 100).select(["id", "name", "price"]).sort("id")
+filtered = df.filter(pl.col("<metric_col>") > <threshold>).select([
+    "<id_col>", "<label_col>", "<metric_col>"
+]).sort("<id_col>")
 ```
 
 
@@ -370,7 +373,7 @@ Preserve existing `from __future__ import annotations` at the top; it enables mo
     `unique(..., keep="first", maintain_order=True)`.
 12. For pivot tables, sort/select pivot output columns explicitly when exact
     column order matters.
-13. For pivot tables indexed by a derived date/month column, filter null index
-    values before pivoting to match pandas `pivot_table` default behavior.
+13. For pivot tables indexed by a nullable or derived column, filter null index
+    values before pivoting when pandas `pivot_table` would drop those groups.
 
 If you cannot fully migrate a pattern, explain why in comments and use available fallbacks.

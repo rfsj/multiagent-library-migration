@@ -6,6 +6,7 @@ import pytest
 
 from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.agents.migration_agent import MigrationAgent, _retry_feedback_context
+from src.agents.repair_agent import RepairAgent
 from src.agents.validation_agent import _actionable_validation_feedback
 
 
@@ -163,28 +164,23 @@ def test_validation_feedback_identifies_semantic_ordering_repairs():
     feedback = _actionable_validation_feedback(
         {
             "pytest_feedback": (
-                "E       AssertionError: assert [{'customer_id': 'C999', "
-                "'segment': 'standard'}] == [{'customer_id': 'C002', "
-                "'segment': 'vip'}]\n"
-                "E         At index 0 diff: {'customer_id': 'C999', "
-                "'segment': 'standard'} != {'customer_id': 'C002', "
-                "'segment': 'vip'}\n"
-                "E       AssertionError: assert ['month', 'book', 'pen', "
-                "'desk'] == ['month', 'book', 'desk', 'pen']\n"
-                "E         At index 2 diff: 'pen' != 'desk'\n"
-                "E       AssertionError: assert [('C001', 1)] == [('C001', 3)]\n"
-                "E         At index 0 diff: ('C001', 1) != ('C001', 3)\n"
-                "FAILED tests/test_processing.py::test_latest_order_per_customer\n"
-                "E         At index 0 diff: {'month': None, 'book': 40.0} "
-                "!= {'month': '2025-01', 'book': 80.0}"
+                "E       AssertionError: assert [{'entity': 'B', 'score': 1}] "
+                "== [{'entity': 'A', 'score': 9}]\n"
+                "E         At index 0 diff: {'entity': 'B', 'score': 1} "
+                "!= {'entity': 'A', 'score': 9}\n"
+                "E       AssertionError: assert ['index_col', 'z_col', 'a_col'] "
+                "== ['index_col', 'a_col', 'z_col']\n"
+                "E         At index 1 diff: 'z_col' != 'a_col'\n"
+                "E         At index 0 diff: {'index_col': None, 'a_col': 40.0} "
+                "!= {'index_col': 'group-1', 'a_col': 80.0}"
             )
         }
     )
 
-    assert "descending=[True, True, False]" in feedback
+    assert "sort(..., descending=...)" in feedback
     assert "maintain_order=True" in feedback
     assert "column-order mismatch" in feedback
-    assert "is_not_null" in feedback
+    assert "filter null values" in feedback
 
 
 def test_migration_retry_context_includes_structured_repair_plan():
@@ -761,3 +757,32 @@ def test_implementation_review_falls_back_when_structured_output_missing(tmp_pat
     assert payload["issues"][0]["kind"] == "structured_output_missing"
     assert "did not return structured output" in payload["revision_instructions"]
     assert (tmp_path / "logs" / "step_001_implementation_review.json").exists()
+
+
+def test_repair_agent_falls_back_when_structured_output_missing(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    (source_dir / "processing.py").write_text("import polars as pl\n", encoding="utf-8")
+
+    agent = RepairAgent.__new__(RepairAgent)
+    agent._chain = FakeReviewChain([None])
+
+    payload = agent.build_repair_plan(
+        project_dir=project_dir,
+        planned_step={"step_id": "step_001", "file": "src/processing.py"},
+        migration_result={"changed": True},
+        validation_evidence={
+            "actionable_feedback": "Preserve semantic ordering.",
+            "pytest_feedback": "E       AssertionError: row order differs",
+        },
+        logs_dir=logs_dir,
+        attempt=1,
+    )
+
+    assert payload["failure_category"] == "unknown"
+    assert payload["repair_strategy"] == "fallback_to_validation_feedback"
+    assert "Preserve semantic ordering." in payload["instructions_for_migration_agent"]
+    assert "Do not introduce benchmark-specific hardcoded values." in payload["must_not_do"]
+    assert (logs_dir / "step_001_repair_01.json").exists()

@@ -79,8 +79,6 @@ class MigrationAgent:
 
     def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
-        self._migration_structured_output_attempts = 0
-        self._migration_structured_output_error = ""
         if step.get("files"):
             return self._run_grouped_step(project_dir, step, logs_dir)
 
@@ -88,23 +86,21 @@ class MigrationAgent:
         self._validate_step_scope(step, rel_file)
         target = project_dir / rel_file
         original = target.read_text(encoding="utf-8")
-        
-        # Invoke LLM to migrate the file
+
         retry_feedback = step.get("retry_feedback")
-        migrated = self._migrate_file_with_llm(
+        migrated, total_attempts, last_error = self._migrate_file_with_llm(
             rel_file,
             original,
             step,
             retry_feedback,
             logs_dir,
         )
-        
+
         changed_files: list[str] = []
         if migrated != original:
             target.write_text(migrated, encoding="utf-8")
             changed_files.append(str(rel_file))
 
-        # Handle requirements.txt migration if needed
         if rel_file.name != "requirements.txt" and "requirements.txt" in step.get("allowed_files", []):
             if self._migrate_allowed_requirements(project_dir, step):
                 changed_files.append("requirements.txt")
@@ -119,12 +115,10 @@ class MigrationAgent:
             "status": "completed" if changed_files else "no_change",
             "retry_feedback_received": bool(retry_feedback),
         }
-        if self._migration_structured_output_attempts:
-            result["structured_output_attempts"] = (
-                self._migration_structured_output_attempts
-            )
-        if self._migration_structured_output_error:
-            result["structured_output_error"] = self._migration_structured_output_error
+        if total_attempts:
+            result["structured_output_attempts"] = total_attempts
+        if last_error:
+            result["structured_output_error"] = last_error
         (logs_dir / f"{step['step_id']}_migration.json").write_text(
             json.dumps(result, indent=2), encoding="utf-8"
         )
@@ -148,7 +142,7 @@ class MigrationAgent:
             self._validate_step_scope(file_step, rel_file)
             target = project_dir / rel_file
             original = target.read_text(encoding="utf-8")
-            migrated = self._migrate_file_with_llm(
+            migrated, file_attempts, file_error = self._migrate_file_with_llm(
                 rel_file,
                 original,
                 file_step,
@@ -163,8 +157,8 @@ class MigrationAgent:
                 {
                     "file": str(rel_file),
                     "changed": changed,
-                    "structured_output_attempts": self._migration_structured_output_attempts,
-                    "structured_output_error": self._migration_structured_output_error,
+                    "structured_output_attempts": file_attempts,
+                    "structured_output_error": file_error,
                 }
             )
 
@@ -196,21 +190,26 @@ class MigrationAgent:
         step: dict[str, Any],
         retry_feedback: dict[str, Any] | str | None,
         logs_dir: Path,
-    ) -> str:
+    ) -> tuple[str, int, str]:
         if rel_file.name == "requirements.txt":
-            return self._migrate_requirements(source, step)
-        
+            return self._migrate_requirements(source, step), 0, ""
+
         if rel_file.suffix != ".py":
-            return source
+            return source, 0, ""
 
         allowed_symbols = step.get("allowed_symbols", [])
-        migrated = self._invoke_migration_chain(rel_file, source, step, retry_feedback)
+        migrated, total_attempts, last_error = self._invoke_migration_chain(
+            rel_file, source, step, retry_feedback
+        )
         if allowed_symbols:
             migrated = self._apply_allowed_symbol_scope(source, migrated, allowed_symbols)
 
-        migrated = self._regenerate_if_invalid_python(
+        migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
             rel_file, source, step, migrated, allowed_symbols
         )
+        total_attempts += regen_attempts
+        if regen_error:
+            last_error = regen_error
 
         revision_index = 0
         review = self._review_migrated_code(rel_file, source, migrated, step, logs_dir)
@@ -220,23 +219,25 @@ class MigrationAgent:
             and revision_index < MAX_IMPLEMENTATION_REVIEW_REVISIONS
         ):
             revision_index += 1
-            migrated = self._invoke_migration_chain(
+            migrated, rev_attempts, rev_error = self._invoke_migration_chain(
                 rel_file,
                 source,
                 step,
-                {
-                    "feedback_for_agent": _review_feedback_for_migration(
-                        review, migrated
-                    )
-                },
+                {"feedback_for_agent": _review_feedback_for_migration(review, migrated)},
             )
+            total_attempts += rev_attempts
+            if rev_error:
+                last_error = rev_error
             if allowed_symbols:
                 migrated = self._apply_allowed_symbol_scope(
                     source, migrated, allowed_symbols
                 )
-            migrated = self._regenerate_if_invalid_python(
+            migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
                 rel_file, source, step, migrated, allowed_symbols
             )
+            total_attempts += regen_attempts
+            if regen_error:
+                last_error = regen_error
             suffix = (
                 "implementation_review_after_revision"
                 if revision_index == 1
@@ -251,7 +252,7 @@ class MigrationAgent:
                 log_suffix=suffix,
             )
 
-        return migrated
+        return migrated, total_attempts, last_error
 
     def _regenerate_if_invalid_python(
         self,
@@ -260,11 +261,11 @@ class MigrationAgent:
         step: dict[str, Any],
         migrated: str,
         allowed_symbols: list[str],
-    ) -> str:
+    ) -> tuple[str, int, str]:
         syntax_error = self._validate_python39_syntax(migrated)
         if not syntax_error:
-            return migrated
-        regenerated = self._invoke_migration_chain(
+            return migrated, 0, ""
+        regenerated, attempts, error = self._invoke_migration_chain(
             rel_file,
             source,
             step,
@@ -280,7 +281,7 @@ class MigrationAgent:
             regenerated = self._apply_allowed_symbol_scope(
                 source, regenerated, allowed_symbols
             )
-        return regenerated
+        return regenerated, attempts, error
 
     def _invoke_migration_chain(
         self,
@@ -288,7 +289,7 @@ class MigrationAgent:
         source: str,
         step: dict[str, Any],
         retry_feedback: dict[str, Any] | str | None,
-    ) -> str:
+    ) -> tuple[str, int, str]:
         allowed_symbols = step.get("allowed_symbols", [])
         allowed_symbols_str = ", ".join(allowed_symbols) if allowed_symbols else "(all code in file)"
 
@@ -307,16 +308,11 @@ class MigrationAgent:
         }
         for attempt in range(1, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS + 1):
             result: MigrationResult | None = self._chain.invoke(prompt_payload)
-            self._migration_structured_output_attempts = attempt
             migrated_code = getattr(result, "migrated_code", None)
             if isinstance(migrated_code, str):
-                self._migration_structured_output_error = ""
-                return migrated_code
+                return migrated_code, attempt, ""
 
-        self._migration_structured_output_error = (
-            "MigrationAgent returned no structured output."
-        )
-        return source
+        return source, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS, "MigrationAgent returned no structured output."
 
     def _review_migrated_code(
         self,
@@ -409,34 +405,55 @@ class MigrationAgent:
         return "".join(lines)
 
     def _remove_unused_pandas_alias_import(self, source: str) -> str:
-        if "pd." in source:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
             return source
-        return re.sub(r"^import pandas as pd\n+", "", source, flags=re.MULTILINE)
+
+        # Collect every 'import pandas as <alias>' alias name.
+        pandas_aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "pandas" and alias.asname:
+                        pandas_aliases.add(alias.asname)
+
+        if not pandas_aliases:
+            return source
+
+        # An alias is "used" only when it appears as the object of an attribute
+        # access (e.g. pd.DataFrame), not when it merely appears in a comment or
+        # string literal.
+        referenced = {
+            node.value.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in pandas_aliases
+        }
+
+        unused = pandas_aliases - referenced
+        if not unused:
+            return source
+
+        result = source
+        for alias in unused:
+            result = re.sub(
+                rf"^import pandas as {re.escape(alias)}\n+",
+                "",
+                result,
+                flags=re.MULTILINE,
+            )
+        return result
 
 
 
     def _validate_python39_syntax(self, code: str) -> str | None:
-        """
-        Validate that code is syntactically compatible with Python 3.9.
-        Returns None if valid, or error message string if invalid.
-        
-        Catches common issues like PEP 604 union syntax (str | Path)
-        which is only available in Python 3.10+.
-        """
         try:
-            ast.parse(code)
-            return None  # Valid syntax
+            tree = ast.parse(code)
         except SyntaxError as e:
-            error_msg = f"Syntax error on line {e.lineno}: {e.msg}"
-            
-            # Detect PEP 604 union syntax error
-            if "invalid syntax (<|>" in str(e) or "unsupported operand type" in str(e):
-                error_msg = (
-                    f"Line {e.lineno}: PEP 604 union syntax (X | Y) not supported in Python 3.9. "
-                    f"Use Union[X, Y] from typing module instead. Error: {e.msg}"
-                )
-            
-            return error_msg
+            return f"Syntax error on line {e.lineno}: {e.msg}"
+        return _check_pep604_union_types(tree)
 
 
 
@@ -620,6 +637,52 @@ def _retry_feedback_context(retry_feedback: dict[str, Any] | str) -> str:
             ]
         )
     return "\n" + "\n".join(parts)
+
+
+def _check_pep604_union_types(tree: ast.Module) -> str | None:
+    """Return an error message if the code uses X | Y in annotations without
+    'from __future__ import annotations'.
+
+    In Python 3.9, X | Y is bitwise OR (valid syntax) but causes a TypeError
+    at annotation-evaluation time when X or Y are type objects.  With the
+    __future__ import, annotations are stored as strings and never evaluated,
+    so the expression is safe.  Python 3.10+ natively supports the union type.
+    """
+    for node in tree.body:
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "__future__"
+            and any(alias.name == "annotations" for alias in node.names)
+        ):
+            return None
+
+    annotation_nodes: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign):
+            annotation_nodes.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.returns is not None:
+                annotation_nodes.append(node.returns)
+            for arg in (
+                node.args.args
+                + node.args.posonlyargs
+                + node.args.kwonlyargs
+                + ([node.args.vararg] if node.args.vararg else [])
+                + ([node.args.kwarg] if node.args.kwarg else [])
+            ):
+                if arg.annotation is not None:
+                    annotation_nodes.append(arg.annotation)
+
+    for annotation in annotation_nodes:
+        for subnode in ast.walk(annotation):
+            if isinstance(subnode, ast.BinOp) and isinstance(subnode.op, ast.BitOr):
+                return (
+                    f"Line {subnode.lineno}: X | Y union syntax in annotations "
+                    "causes a TypeError at runtime on Python 3.9. Add "
+                    "'from __future__ import annotations' at the top of the file "
+                    "or use Union[X, Y] from the typing module instead."
+                )
+    return None
 
 
 def _pinned_runtime_dependency(requirement: str) -> tuple[str, str] | None:

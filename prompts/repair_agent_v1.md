@@ -67,11 +67,11 @@ classify it as `polars_api_error` and prescribe the correct Polars API.
 
 If multiple pytest failures appear because the full test suite ran after an
 early scoped step, do not let failures from later unplanned files dominate the
-repair plan. For example, if `allowed_files` only contains
-`src/analytics/loaders.py`, traceback lines from `src/analytics/summaries.py`
-or `src/analytics/quality.py` should not produce instructions to edit those
-files. Mention them only as downstream consumers that reveal a boundary
-contract.
+repair plan. If `allowed_files` only contains `<producer_file>`, traceback lines
+from `<downstream_consumer_file>` should not produce instructions to edit that
+consumer. Mention downstream files only as consumers that reveal a boundary
+contract unless the DataFrame flow plan explicitly grouped those files into the
+current step.
 
 ## pandas to Polars Repair Guidance
 
@@ -123,7 +123,7 @@ Use these names. Do not invent near-miss APIs.
   `keep="last"` when pandas used `drop_duplicates(..., keep=...)`.
 - Do not recommend `unique_by`; use `unique`.
 - Select columns with `df.select(["a", "b"])`.
-- Filter rows with `df.filter(pl.col("status") == "paid")`.
+- Filter rows with `df.filter(pl.col("<category_col>") == "<target_value>")`.
 - Group rows with `df.group_by("col").agg(...)`.
 - Join with `left.join(right, on="id", how="left")`.
 - Fill nulls with `pl.col("col").fill_null(value)` inside `with_columns`.
@@ -147,60 +147,60 @@ Use these names. Do not invent near-miss APIs.
 If failed code contains:
 
 ```python
-orders["gross_revenue"] = orders["quantity"] * orders["unit_price"]
-orders["net_revenue"] = orders["gross_revenue"] * (1 - orders["discount"])
+frame["<derived_col_1>"] = frame["<input_col_a>"] * frame["<input_col_b>"]
+frame["<derived_col_2>"] = frame["<derived_col_1>"] + frame["<input_col_c>"]
 ```
 
 The repair plan should instruct:
 
 ```python
-orders = orders.with_columns(
-    (pl.col("quantity") * pl.col("unit_price")).alias("gross_revenue")
+frame = frame.with_columns(
+    (pl.col("<input_col_a>") * pl.col("<input_col_b>")).alias("<derived_col_1>")
 )
-orders = orders.with_columns(
-    (pl.col("gross_revenue") * (1 - pl.col("discount"))).alias("net_revenue")
+frame = frame.with_columns(
+    (pl.col("<derived_col_1>") + pl.col("<input_col_c>")).alias("<derived_col_2>")
 )
 ```
 
 Do not combine these two expressions into one `with_columns` call because
-`net_revenue` depends on `gross_revenue`.
+`<derived_col_2>` depends on `<derived_col_1>`.
 
 ### Latest row per group repair
 
 For pandas:
 
 ```python
-ordered = orders.sort_values(
-    ["customer_id", "order_date", "order_id"],
+ordered = frame.sort_values(
+    ["<group_key>", "<sort_col>", "<tie_breaker_col>"],
     ascending=[True, False, False],
 )
-latest = ordered.drop_duplicates(subset=["customer_id"], keep="first")
-return latest[["customer_id", "order_id"]].sort_values("customer_id")
+latest = ordered.drop_duplicates(subset=["<group_key>"], keep="first")
+return latest[["<group_key>", "<tie_breaker_col>"]].sort_values("<group_key>")
 ```
 
 The Polars repair should instruct:
 
 ```python
-ordered = orders.sort(
-    ["customer_id", "order_date", "order_id"],
+ordered = frame.sort(
+    ["<group_key>", "<sort_col>", "<tie_breaker_col>"],
     descending=[False, True, True],
 )
-latest = ordered.unique(subset=["customer_id"], keep="first")
-return latest.select(["customer_id", "order_id"]).sort("customer_id")
+latest = ordered.unique(subset=["<group_key>"], keep="first")
+return latest.select(["<group_key>", "<tie_breaker_col>"]).sort("<group_key>")
 ```
 
-If pytest shows that the latest row per customer differs, instruct adding
+If pytest shows that the selected row per group differs, instruct adding
 `maintain_order=True` to `unique(...)` and checking the preceding sort's
 `descending` and `nulls_last` arguments:
 
 ```python
-ordered = orders.sort(
-    ["customer_id", "order_date", "order_id"],
+ordered = frame.sort(
+    ["<group_key>", "<sort_col>", "<tie_breaker_col>"],
     descending=[False, True, True],
     nulls_last=True,
 )
 latest = ordered.unique(
-    subset=["customer_id"],
+    subset=["<group_key>"],
     keep="first",
     maintain_order=True,
 )
@@ -213,12 +213,11 @@ pandas Series operators when the value is a Polars DataFrame. Prefer direct
 Polars expressions:
 
 ```python
-invalid = orders.filter(
-    pl.col("order_date").is_null()
-    | (pl.col("quantity") <= 0)
-    | (pl.col("unit_price") < 0)
-    | ~pl.col("status").is_in(["paid", "pending", "cancelled"])
-).select(["order_id", "customer_id", "status"])
+invalid = frame.filter(
+    pl.col("<nullable_col>").is_null()
+    | (pl.col("<numeric_col>") <= 0)
+    | ~pl.col("<category_col>").is_in(["<allowed_value>", "<other_allowed_value>"])
+).select(["<id_col>", "<group_key>", "<category_col>"])
 ```
 
 ### Producer/consumer type mismatch repair
@@ -232,7 +231,7 @@ AttributeError: 'DataFrame' object has no attribute 'sort'
 and the failed code contains valid Polars code such as:
 
 ```python
-orders.sort(["customer_id", "order_date"])
+frame.sort(["<group_key>", "<sort_col>"])
 ```
 
 do not instruct replacing `.sort(...)`. Polars DataFrames support `.sort(...)`.
@@ -240,51 +239,51 @@ Instead instruct:
 
 ```text
 Classify as producer_consumer_type_mismatch. Keep the consumer's `.sort(...)`
-call. Repair the upstream producer that supplies `orders` so it returns a
+call. Repair the upstream producer that supplies `frame` so it returns a
 Polars DataFrame before this consumer runs. If the producer is outside
-`allowed_files`, convert at the boundary with `orders = pl.from_pandas(orders)`
+`allowed_files`, convert at the boundary with `frame = pl.from_pandas(frame)`
 and record that this is a scope-limited boundary conversion.
 ```
 
 If the planned step includes DataFrame flow analysis showing that
-`quality.latest_order_per_customer` consumes the output of
-`loaders.load_orders`, name that producer explicitly in the instructions.
+`<consumer_symbol>` consumes the output of `<producer_symbol>`, name those
+producer/consumer symbols explicitly in the instructions.
 
 ### Scoped repair with downstream failures
 
-If the allowed file is `src/analytics/loaders.py` and pytest also reports
-`groupby`, `sort_values`, or Series assignment failures in downstream files such
-as `summaries.py` or `quality.py`, instruct the Migration Agent:
+If the allowed file is `<producer_file>` and pytest also reports pandas API
+failures such as `groupby`, `sort_values`, or Series assignment in downstream
+files outside `allowed_files`, instruct the Migration Agent:
 
 ```text
 Do not edit downstream files in this retry. Complete the producer migration in
-`loaders.py` only. Ensure `load_orders`, `load_customers`, and `paid_orders`
-return Polars DataFrames consistently. Ignore downstream pandas API failures as
+`<producer_file>` only. Ensure the planned producer symbols return the target
+library DataFrame type consistently. Treat downstream pandas API failures as
 future-step context unless they point to an invalid value returned by this
 producer.
 ```
 
-If `loaders.py` still contains pandas code after a failed retry, classify the
-problem as `polars_api_error` or `unsupported_operation` for the allowed file
-only, and prescribe concrete replacements in `loaders.py`.
+If `<producer_file>` still contains source-library code after a failed retry,
+classify the problem as `polars_api_error` or `unsupported_operation` for the
+allowed file only, and prescribe concrete replacements in that file.
 
 ### Aggregation repair
 
 For pandas named aggregation:
 
 ```python
-paid.groupby("region", as_index=False).agg(
-    total_revenue=("net_revenue", "sum"),
-    orders=("order_id", "nunique"),
+frame.groupby("<group_key>", as_index=False).agg(
+    output_sum=("<value_col>", "sum"),
+    output_unique=("<id_col>", "nunique"),
 )
 ```
 
 The Polars repair should instruct:
 
 ```python
-paid.group_by("region").agg([
-    pl.col("net_revenue").sum().alias("total_revenue"),
-    pl.col("order_id").n_unique().alias("orders"),
+frame.group_by("<group_key>").agg([
+    pl.col("<value_col>").sum().alias("output_sum"),
+    pl.col("<id_col>").n_unique().alias("output_unique"),
 ])
 ```
 
@@ -293,48 +292,53 @@ Migration Agent to compare pandas `ascending` with Polars `descending` and fix
 the list. For example:
 
 ```python
-result = result.sort(["total_revenue", "region"], descending=[True, False])
+result = result.sort(["<metric_col>", "<group_key>"], descending=[True, False])
 ```
 
-for pandas `sort_values(["total_revenue", "region"], ascending=[False, True])`.
+for pandas `sort_values(["<metric_col>", "<group_key>"], ascending=[False, True])`.
 
 If pytest says `sort() got an unexpected keyword argument 'ascending'`,
 classify it as `polars_api_error` and instruct replacing `ascending=` with the
 equivalent inverted `descending=` list.
 
-For customer lifetime value style sorting:
+For any multi-column sort with mixed directions:
 
 ```python
 result.sort(
-    ["segment", "total_spend", "customer_id"],
+    ["<primary_sort_col>", "<metric_col>", "<tie_breaker_col>"],
     descending=[True, True, False],
 )
 ```
 
 preserves pandas `ascending=[False, False, True]`.
 
-If pytest shows the first customer row is a `standard` segment customer with
-zero spend when pandas expected a `vip` customer first, classify the failure as
-`semantic_equivalence_error` and instruct fixing the final sort to
-`descending=[True, True, False]`.
+If pytest shows the first returned row or selected record differs after a
+multi-column sort, classify the failure as `semantic_equivalence_error` and
+instruct deriving the exact Polars `descending=[...]` list by inverting the
+original pandas `ascending=[...]` list. Do not infer sort directions from column
+names or benchmark-specific expectations.
 
 ### Pivot repair
 
-For pandas `pd.pivot_table(..., fill_value=0.0)`, instruct the Migration Agent
-to use Polars `pivot` on the DataFrame:
+For pandas `pd.pivot_table(..., fill_value=<value>)`, instruct the Migration
+Agent to use Polars `pivot` on the DataFrame:
 
 ```python
-matrix = paid.pivot(
-    values="net_revenue",
-    index="month",
-    on="product",
+matrix = frame.pivot(
+    values="<value_col>",
+    index="<index_col>",
+    on="<pivot_col>",
     aggregate_function="sum",
-).fill_null(0.0)
-product_columns = sorted([column for column in matrix.columns if column != "month"])
-matrix = matrix.select(["month", *product_columns])
+).fill_null(<fill_value>)
+index_columns = ["<index_col>"]
+pivot_value_columns = sorted([
+    column for column in matrix.columns if column not in index_columns
+])
+matrix = matrix.select([*index_columns, *pivot_value_columns])
 ```
 
-Then sort with `.sort("month")`.
+Then sort by the original pandas output ordering column(s), if the original code
+or tests require deterministic row order.
 
 If pytest says `pivot() got an unexpected keyword argument 'fill_null'` or
 `fill_null_value`, instruct the Migration Agent to remove that keyword from the
@@ -343,16 +347,14 @@ that `columns` was renamed, instruct using `on=`.
 
 If pytest shows pivot columns in the wrong order, classify it as
 `semantic_equivalence_error` and instruct sorting the pivoted value columns and
-selecting `["month", *product_columns]` before returning.
+selecting `[<index columns>, <ordered pivot value columns>]` before returning.
 
-If pytest shows a returned pivot row with `"month": None` but pandas expected
-the first month such as `"2025-01"`, classify it as
-`semantic_equivalence_error`. Instruct filtering null month values before the
-pivot:
+If pytest shows a returned pivot row with a null/`None` index value where pandas
+omitted that group, classify it as `semantic_equivalence_error`. Instruct
+filtering null values from the pivot index column before the pivot:
 
 ```python
-paid = paid.with_columns(pl.col("order_date").dt.strftime("%Y-%m").alias("month"))
-paid = paid.filter(pl.col("month").is_not_null())
+frame = frame.filter(pl.col("<index_col>").is_not_null())
 ```
 
 This matches pandas `pivot_table`, which drops null index groups by default.
@@ -373,7 +375,8 @@ Good examples:
 - `Every pandas drop_duplicates(..., keep="first") after a sort is migrated to
   unique(..., keep="first", maintain_order=True)`.
 - `The pivot call uses on= and chains .fill_null(0.0) after pivot`.
-- `Rows with null month are filtered before pivot`.
+- `Rows with null pivot index values are filtered before pivot when pandas
+  dropped those groups`.
 
 Bad examples:
 

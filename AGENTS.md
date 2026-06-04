@@ -34,6 +34,21 @@ forma auditavel e evolua o comportamento geral do diagnosis, migration ou
 validation. Nao esconda falhas alterando testes ou moldando o projeto de entrada
 apenas para um caso passar.
 
+Mesmo quando o objetivo imediato for corrigir uma falha concreta, os agentes
+nao devem introduzir mocks, hardcodes, fixtures artificiais, regras por nome de
+arquivo/projeto ou qualquer comportamento moldado apenas para fazer aquele caso
+passar. A correcao deve atacar a causa geral do problema ou registrar
+explicitamente a limitacao quando uma solucao generalizavel ainda nao existir.
+
+Tambem e proibido fazer o sistema "passar por regra especifica": nao adicione
+heuristicas de runtime, validacoes, prompts ou exemplos normativos que
+reconhecam uma task por nomes de colunas, valores esperados, funcoes, arquivos,
+testes, caminhos ou mensagens de erro exclusivas do benchmark atual. Quando uma
+falha revelar um padrao real, descreva a regra em termos da API, do AST, do
+fluxo produtor/consumidor, do contrato de escopo ou da diferenca semantica
+observada entre biblioteca de origem e destino. Exemplos podem existir, mas nao
+podem virar condicoes especiais escondidas para um caso especifico.
+
 ## Fluxo dos Agentes
 
 O workflow e dividido em tres partes: diagnosis, migration e validation. Cada

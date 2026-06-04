@@ -142,6 +142,7 @@ class ValidationAgent:
         source_library: str,
         allowed_files: list[str] | None = None,
     ) -> dict[str, Any]:
+        self._install_dependencies(project_dir, logs_dir / "final_install.log")
         scan = scan_project(project_dir, source_library)
         diff = analyze_diff(before_dir, project_dir, allowed_files=allowed_files)
         tests = run_pytest(project_dir, logs_dir / "final_pytest.log")
@@ -218,29 +219,13 @@ class ValidationAgent:
         if not path.exists():
             return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
-        content = path.read_text(encoding="utf-8")
-        allowed_symbols = step.get("allowed_symbols", [])
-        if allowed_symbols:
-            content = _source_for_symbols(content, allowed_symbols)
-            old_imports = content.count(f"import {source_library}") + content.count(
-                f"from {source_library} import"
-            )
-            alias_uses = content.count("pd.") if source_library == "pandas" else 0
-            direct_uses = content.count(f"{source_library}.")
-            return {
-                "old_imports_remaining": old_imports,
-                "unmigrated_uses": alias_uses + direct_uses,
-            }
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
-        old_imports = content.count(f"import {source_library}") + content.count(
-            f"from {source_library} import"
-        )
-        alias_uses = content.count("pd.") if source_library == "pandas" else 0
-        direct_uses = content.count(f"{source_library}.")
-        return {
-            "old_imports_remaining": old_imports,
-            "unmigrated_uses": alias_uses + direct_uses,
-        }
+        allowed_symbols = step.get("allowed_symbols", [])
+        return _ast_count_source_usage(tree, source_library, allowed_symbols)
 
     def _deterministic_step_verdict(
         self,
@@ -302,19 +287,83 @@ class ValidationAgent:
         return self._chain
 
 
-def _source_for_symbols(source: str, symbols: list[str]) -> str:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return source
-    lines = source.splitlines(keepends=True)
-    parts = []
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        if node.name in symbols and hasattr(node, "end_lineno"):
-            parts.append("".join(lines[node.lineno - 1:node.end_lineno]))
-    return "\n".join(parts) if parts else source
+def _ast_library_aliases(tree: ast.Module, source_library: str) -> set[str]:
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == source_library or alias.name.startswith(f"{source_library}."):
+                    aliases.add(alias.asname or alias.name.split(".")[0])
+    return aliases
+
+
+def _ast_node_imports_library(node: ast.AST, source_library: str) -> bool:
+    if isinstance(node, ast.Import):
+        return any(
+            alias.name == source_library or alias.name.startswith(f"{source_library}.")
+            for alias in node.names
+        )
+    if isinstance(node, ast.ImportFrom):
+        module = node.module or ""
+        return module == source_library or module.startswith(f"{source_library}.")
+    return False
+
+
+def _ast_count_source_usage(
+    tree: ast.Module,
+    source_library: str,
+    allowed_symbols: list[str],
+) -> dict[str, int]:
+    aliases = _ast_library_aliases(tree, source_library)
+
+    if allowed_symbols:
+        symbol_set = set(allowed_symbols)
+        check_nodes: list[ast.AST] = []
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name in symbol_set
+            ):
+                check_nodes.extend(ast.walk(node))
+        old_imports = sum(
+            1 for node in check_nodes if _ast_node_imports_library(node, source_library)
+        )
+        unmigrated_uses = sum(
+            1
+            for node in check_nodes
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+        )
+    else:
+        walk = list(ast.walk(tree))
+        old_imports = sum(
+            1 for node in walk if _ast_node_imports_library(node, source_library)
+        )
+        unmigrated_uses = sum(
+            1
+            for node in walk
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+        )
+
+    return {"old_imports_remaining": old_imports, "unmigrated_uses": unmigrated_uses}
+
+
+_PYTEST_FAILURE_PATTERNS = frozenset({
+    "AttributeError:",
+    "TypeError:",
+    "ValueError:",
+    "AssertionError:",
+    "ImportError:",
+    "ModuleNotFoundError:",
+    # Polars-specific
+    "ColumnNotFoundError:",
+    "InvalidOperationError:",
+    "SchemaError:",
+    "ComputeError:",
+})
 
 
 def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
@@ -333,9 +382,7 @@ def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
         if (
             line.startswith("E       ")
             or "FAILED " in line
-            or "AttributeError:" in line
-            or "TypeError:" in line
-            or "ColumnNotFoundError:" in line
+            or any(pattern in line for pattern in _PYTEST_FAILURE_PATTERNS)
         )
     ]
     selected = failure_lines[-max_lines:] if failure_lines else lines[-max_lines:]
@@ -347,6 +394,8 @@ def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
     if not pytest_feedback:
         return "Review validation evidence and revise the implementation."
     hints = []
+    has_assertion_index_diff = "At index" in pytest_feedback and " diff" in pytest_feedback
+    has_list_like_diff = "[" in pytest_feedback and "]" in pytest_feedback
     if "does not support `Series` assignment by index" in pytest_feedback:
         hints.append(
             "The migrated code is assigning columns with pandas syntax on a "
@@ -377,37 +426,27 @@ def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
             "uses descending= with inverted booleans, for example pandas "
             "ascending=[False, False, True] becomes descending=[True, True, False]."
         )
-    if "At index 0 diff" in pytest_feedback and "segment" in pytest_feedback:
+    if has_assertion_index_diff:
         hints.append(
-            "The migrated code returns rows in the wrong order for customer "
-            "lifetime value output. Preserve pandas sort_values(['segment', "
-            "'total_spend', 'customer_id'], ascending=[False, False, True]) as "
-            "Polars sort(..., descending=[True, True, False])."
+            "The migrated code has a semantic mismatch in row order or selected "
+            "rows. Compare each original pandas sort_values(..., ascending=...) "
+            "with the Polars sort(..., descending=...) equivalent, preserve null "
+            "ordering, and when pandas sorted before drop_duplicates(..., "
+            "keep='first'), use unique(..., keep='first', maintain_order=True)."
         )
-    if (
-        "At index 0 diff" in pytest_feedback
-        and (
-            "order_id" in pytest_feedback
-            or "latest_order_per_customer" in pytest_feedback
-        )
-    ):
+    if "columns" in pytest_feedback or (has_assertion_index_diff and has_list_like_diff):
         hints.append(
-            "The migrated latest-row-per-group logic selected a different row. "
-            "For pandas sort_values(...).drop_duplicates(..., keep='first'), use "
-            "Polars sort with matching descending/nulls_last and then "
-            "unique(..., keep='first', maintain_order=True)."
+            "The migrated output may have a column-order mismatch. If this comes "
+            "from a pivot/table reshape, preserve the original index columns and "
+            "explicitly select pivoted value columns in the expected deterministic "
+            "order before returning."
         )
-    if "At index 2 diff" in pytest_feedback or "columns" in pytest_feedback:
+    if ": None" in pytest_feedback or ": null" in pytest_feedback or "None}" in pytest_feedback:
         hints.append(
-            "The migrated pivot output has a column-order mismatch. After "
-            "Polars pivot, sort the pivoted value columns and select ['month', "
-            "*product_columns] before returning."
-        )
-    if "'month': None" in pytest_feedback or '"month": None' in pytest_feedback:
-        hints.append(
-            "The migrated pivot output includes a null month group. pandas "
-            "pivot_table drops null index groups by default; filter "
-            "pl.col('month').is_not_null() before the Polars pivot."
+            "The migrated output includes a null grouping/index value. If the "
+            "original pandas operation dropped null groups, filter null values "
+            "from the relevant grouping or pivot index column before the Polars "
+            "operation."
         )
     if not hints:
         hints.append("Use the pytest failure excerpt to revise the implementation.")

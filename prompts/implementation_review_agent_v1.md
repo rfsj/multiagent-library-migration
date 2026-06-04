@@ -44,8 +44,8 @@ Migration Agent to split the dependent expressions into sequential
 `with_columns` calls.
 
 Return `needs_revision` if migrated Polars code assigns columns with pandas
-syntax, for example `orders["net_revenue"] = ...`. In Polars, column creation or
-replacement must use `with_columns`.
+syntax, for example `frame["<derived_col>"] = ...`. In Polars, column creation
+or replacement must use `with_columns`.
 
 Return `needs_revision` if a migrated file still imports pandas or calls `pd.`
 inside the planned migrated scope. A file-level pandas to Polars step is not
@@ -61,8 +61,8 @@ original code used the index as data, for example by reading it as a column,
 joining on it, or returning it.
 
 Do not invent null-handling requirements that are absent from the original
-pandas code. If pandas only filled `discount`, do not require the migration to
-fill unrelated columns such as `quantity` or `unit_price`.
+pandas code. If pandas only filled `<nullable_col>`, do not require the
+migration to fill unrelated columns such as `<other_col_a>` or `<other_col_b>`.
 
 Return `needs_revision` if a Polars `sort` does not preserve pandas
 `ascending` semantics. Check multi-column sorts carefully:
@@ -90,9 +90,10 @@ sort is migrated to Polars `unique(..., keep="first")` without
 `maintain_order=True`. Without `maintain_order=True`, the selected row per group
 may differ from pandas' "first row in the sorted frame" behavior.
 
-Return `needs_revision` if customer lifetime value style code migrates
-`sort_values(["segment", "total_spend", "customer_id"], ascending=[False,
-False, True])` without `descending=[True, True, False]`.
+Return `needs_revision` if any pandas multi-column `sort_values(...,
+ascending=[...])` is migrated without the equivalent Polars
+`sort(..., descending=[...])` list. The Polars list must be derived by inverting
+each original pandas ascending flag, regardless of the column names.
 
 Return `needs_revision` if a Polars 1.17-compatible `pivot` migration passes
 unsupported arguments. In this project, use:
@@ -115,36 +116,38 @@ and downstream tests compare columns exactly. The migrated code should sort
 pivoted value columns and then select them explicitly, for example:
 
 ```python
-product_columns = sorted([column for column in matrix.columns if column != "month"])
-matrix = matrix.select(["month", *product_columns])
+index_columns = ["<index_col>"]
+pivot_value_columns = sorted([
+    column for column in matrix.columns if column not in index_columns
+])
+matrix = matrix.select([*index_columns, *pivot_value_columns])
 ```
 
-Return `needs_revision` if pandas `pivot_table` indexed by a derived
-date/month column is migrated without filtering null index values before the
-Polars pivot. pandas `pivot_table` drops null index groups by default, while
-Polars can keep a `null`/`None` group. For month pivots, request:
+Return `needs_revision` if pandas `pivot_table` indexed by a derived column is
+migrated without filtering null index values before the Polars pivot when pandas
+would drop those groups. pandas `pivot_table` drops null index groups by
+default, while Polars can keep a `null`/`None` group. Request:
 
 ```python
-paid = paid.with_columns(pl.col("order_date").dt.strftime("%Y-%m").alias("month"))
-paid = paid.filter(pl.col("month").is_not_null())
+frame = frame.filter(pl.col("<index_col>").is_not_null())
 ```
 
 Example issue:
 
 ```python
-orders = orders.with_columns([
-    (pl.col("quantity") * pl.col("unit_price")).alias("gross_revenue"),
-    (pl.col("gross_revenue") * (1 - pl.col("discount"))).alias("net_revenue"),
+frame = frame.with_columns([
+    (pl.col("<input_col_a>") * pl.col("<input_col_b>")).alias("<derived_col_1>"),
+    (pl.col("<derived_col_1>") + pl.col("<input_col_c>")).alias("<derived_col_2>"),
 ])
 ```
 
-This must be reviewed as `needs_revision` because `gross_revenue` is not yet
+This must be reviewed as `needs_revision` because `<derived_col_1>` is not yet
 available to the second expression during the same `with_columns` evaluation.
 
 Example issue:
 
 ```python
-orders["gross_revenue"] = orders["quantity"] * orders["unit_price"]
+frame["<derived_col>"] = frame["<input_col_a>"] * frame["<input_col_b>"]
 ```
 
 This must be reviewed as `needs_revision` in migrated Polars code. The revision
@@ -154,62 +157,62 @@ instruction should tell the Migration Agent to replace assignment by index with
 Example issue:
 
 ```python
-result.sort(["total_revenue", "region"])
+result.sort(["<metric_col>", "<group_key>"])
 ```
 
 This must be reviewed as `needs_revision` if the original pandas code used
-`sort_values(["total_revenue", "region"], ascending=[False, True])`. The
+`sort_values(["<metric_col>", "<group_key>"], ascending=[False, True])`. The
 revision instruction should request
-`sort(["total_revenue", "region"], descending=[True, False])`.
+`sort(["<metric_col>", "<group_key>"], descending=[True, False])`.
 
 Example issue:
 
 ```python
-return orders.sort(["order_date", "order_id"])
+return frame.sort(["<nullable_sort_col>", "<tie_breaker_col>"])
 ```
 
 This must be reviewed as `needs_revision` if the original pandas code parsed
-`order_date` with `errors="coerce"` and then used pandas `sort_values` on
-`order_date`. The revision instruction should request
-`sort(["order_date", "order_id"], nulls_last=True)`.
+`<nullable_sort_col>` with `errors="coerce"` and then used pandas `sort_values`
+on `<nullable_sort_col>`. The revision instruction should request
+`sort(["<nullable_sort_col>", "<tie_breaker_col>"], nulls_last=True)`.
 
 Example issue:
 
 ```python
-matrix = paid.pivot(
-    values="net_revenue",
-    index="month",
-    columns="product",
+matrix = frame.pivot(
+    values="<value_col>",
+    index="<index_col>",
+    columns="<pivot_col>",
     aggregate_function="sum",
-    fill_null=0.0,
+    fill_null=<fill_value>,
 )
 ```
 
 This must be reviewed as `needs_revision` for Polars 1.17 compatibility. The
-revision instruction should request `on="product"` and `.fill_null(0.0)` after
-the pivot call.
+revision instruction should request `on="<pivot_col>"` and
+`.fill_null(<fill_value>)` after the pivot call.
 
 Example issue:
 
 ```python
-paid = paid.with_columns(pl.col("order_date").dt.strftime("%Y-%m").alias("month"))
-matrix = paid.pivot(values="net_revenue", index="month", on="product")
+frame = frame.with_columns(<expression>.alias("<index_col>"))
+matrix = frame.pivot(values="<value_col>", index="<index_col>", on="<pivot_col>")
 ```
 
 This must be reviewed as `needs_revision` if the original pandas code used
-`pd.pivot_table(..., index="month", ...)` because null `month` groups should be
-filtered before the pivot.
+`pd.pivot_table(..., index="<index_col>", ...)` and pandas would drop null
+`<index_col>` groups before the pivot.
 
 Example issue:
 
 ```python
-latest = ordered.unique(subset=["customer_id"], keep="first")
+latest = ordered.unique(subset=["<group_key>"], keep="first")
 ```
 
 This must be reviewed as `needs_revision` if the original pandas code sorted
-then used `drop_duplicates(subset=["customer_id"], keep="first")`. The revision
+then used `drop_duplicates(subset=["<group_key>"], keep="first")`. The revision
 instruction should request
-`unique(subset=["customer_id"], keep="first", maintain_order=True)`.
+`unique(subset=["<group_key>"], keep="first", maintain_order=True)`.
 
 ## Verdict
 
