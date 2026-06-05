@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.llm import get_llm
+from src.tools.ast_transformer import apply_ast_transforms, ast_fallback_enabled
+from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusing_patterns
 
 load_dotenv()
 
@@ -42,7 +44,7 @@ Migrate the following file from {source_library} to {target_library}.
 - Ensure the code is syntactically valid for Python 3.9+.
 - Preserve all business logic and behavior.
 
-{retry_feedback_context}
+{pattern_analysis}{retry_feedback_context}
 
 Return ONLY the complete migrated file, preserving all untouched code outside the migration scope.
 """
@@ -211,6 +213,18 @@ class MigrationAgent:
         if regen_error:
             last_error = regen_error
 
+        migrated, rescan_attempts, rescan_error = self._rescan_and_retry_if_patterns_remain(
+            rel_file, source, step, migrated, allowed_symbols
+        )
+        total_attempts += rescan_attempts
+        if rescan_error:
+            last_error = rescan_error
+
+        if ast_fallback_enabled() and rel_file.suffix == ".py":
+            source_library = step.get("source_library", "pandas")
+            ast_result = apply_ast_transforms(migrated, source_library)
+            migrated = ast_result.code
+
         revision_index = 0
         review = self._review_migrated_code(rel_file, source, migrated, step, logs_dir)
         while (
@@ -297,13 +311,16 @@ class MigrationAgent:
         if retry_feedback:
             retry_feedback_context = _retry_feedback_context(retry_feedback)
 
+        source_library = step.get("source_library", "pandas")
+        hits = scan_for_confusing_patterns(source, source_library, allowed_symbols or None)
         prompt_payload = {
-            "source_library": step.get("source_library", "pandas"),
+            "source_library": source_library,
             "target_library": step.get("target_library", "polars"),
             "file": str(rel_file),
             "description": step.get("description", "Migrate this file."),
             "allowed_symbols_str": allowed_symbols_str,
             "source_code": source,
+            "pattern_analysis": format_pattern_analysis(hits),
             "retry_feedback_context": retry_feedback_context,
         }
         for attempt in range(1, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS + 1):
@@ -387,6 +404,51 @@ class MigrationAgent:
             scoped = self._ensure_polars_import(scoped)
         scoped = self._remove_unused_pandas_alias_import(scoped)
         return scoped
+
+    def _rescan_and_retry_if_patterns_remain(
+        self,
+        rel_file: Path,
+        source: str,
+        step: dict[str, Any],
+        migrated: str,
+        allowed_symbols: list[str],
+    ) -> tuple[str, int, str]:
+        """Re-scan migrated code and retry once if source-library patterns remain."""
+        if rel_file.suffix != ".py":
+            return migrated, 0, ""
+        source_library = step.get("source_library", "pandas")
+        remaining = scan_for_confusing_patterns(migrated, source_library, allowed_symbols or None)
+        if not remaining:
+            return migrated, 0, ""
+        migrated_lines = migrated.splitlines()
+        pattern_items = []
+        for hit in remaining:
+            line_content = (
+                migrated_lines[hit.line - 1].strip()
+                if 0 < hit.line <= len(migrated_lines)
+                else ""
+            )
+            pattern_items.append(
+                f"- [ ] Line {hit.line}: `{line_content}`\n"
+                f"      Required fix: {hit.guidance}"
+            )
+        feedback = {
+            "feedback_for_agent": (
+                f"Post-migration scan found {len(remaining)} unconverted pattern(s) "
+                "in the migrated code. The lines below still use source-library syntax "
+                "and MUST be rewritten before returning:\n\n"
+                + "\n".join(pattern_items)
+                + "\n\nFor each line above, replace the shown code with the "
+                "target-library equivalent described in 'Required fix'. "
+                "Return the complete corrected file."
+            )
+        }
+        revised, attempts, error = self._invoke_migration_chain(
+            rel_file, source, step, feedback
+        )
+        if allowed_symbols:
+            revised = self._apply_allowed_symbol_scope(source, revised, allowed_symbols)
+        return revised, attempts, error
 
     def _ensure_polars_import(self, source: str) -> str:
         lines = source.splitlines(keepends=True)
