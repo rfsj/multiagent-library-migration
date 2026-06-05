@@ -294,6 +294,8 @@ def test_diagnosis_groups_cross_file_dataframe_flow_when_required(tmp_path):
         },
     )
 
+    # Cross-file flow with grouped_before_consumers produces one atomic step
+    # so that tests pass consistently when producer and consumer are migrated together.
     assert len(steps) == 1
     assert steps[0]["file"] == "src/loaders.py"
     assert steps[0]["files"] == ["src/loaders.py", "src/summaries.py"]

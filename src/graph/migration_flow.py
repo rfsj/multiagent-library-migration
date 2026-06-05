@@ -31,6 +31,11 @@ def select_next_step(graph_state: GraphState) -> dict[str, Any]:
     retry_feedback = graph_state["retry_counts"].get(step["step_id"])
     if retry_feedback and graph_state["current_step"] and graph_state["current_step"].get("retry_feedback"):
         step["retry_feedback"] = graph_state["current_step"]["retry_feedback"]
+    failed_files = {s["file"] for s in graph_state["failed_steps"] if s.get("file")}
+    if failed_files:
+        upstream = _upstream_failed_files(step, failed_files, step["dataframe_flow_analysis"])
+        if upstream:
+            step["upstream_failed_files"] = upstream
     return {
         "current_step": step,
         "current_snapshot_dir": None,
@@ -73,3 +78,27 @@ def route_after_selection(graph_state: GraphState) -> Literal["snapshot_before_s
     if graph_state["current_step"] is None:
         return "__end__"
     return "snapshot_before_step"
+
+
+def _upstream_failed_files(
+    step: dict[str, Any],
+    failed_files: set[str],
+    dataframe_flow_analysis: dict[str, Any],
+) -> list[str]:
+    """Return producer files for this step that have already failed migration."""
+    step_files = set(step.get("files") or [step["file"]])
+    symbols = dataframe_flow_analysis.get("symbols", [])
+    symbol_to_file: dict[str, str] = {
+        s["symbol"]: s["file"]
+        for s in symbols
+        if s.get("symbol") and s.get("file")
+    }
+    producer_files: set[str] = set()
+    for sym in symbols:
+        if sym.get("file") not in step_files:
+            continue
+        for producer_sym in sym.get("consumes_dataframe_from", []):
+            producer_file = symbol_to_file.get(producer_sym)
+            if producer_file and producer_file not in step_files:
+                producer_files.add(producer_file)
+    return sorted(producer_files & failed_files)

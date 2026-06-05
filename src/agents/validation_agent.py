@@ -309,12 +309,25 @@ def _ast_node_imports_library(node: ast.AST, source_library: str) -> bool:
     return False
 
 
+# Well-known short aliases per library used as a fallback: catches references
+# that remain after the import was removed (partial migration produces code
+# like `pd.read_csv(...)` with no `import pandas as pd`).
+_COMMON_LIBRARY_ALIASES: dict[str, set[str]] = {
+    "pandas": {"pd", "pandas"},
+    "polars": {"pl", "polars"},
+}
+
+
 def _ast_count_source_usage(
     tree: ast.Module,
     source_library: str,
     allowed_symbols: list[str],
 ) -> dict[str, int]:
     aliases = _ast_library_aliases(tree, source_library)
+    # Include well-known short aliases even when the import is absent, so a
+    # partially-migrated file that removed the import but left `pd.` calls is
+    # still detected as having unmigrated uses.
+    aliases |= _COMMON_LIBRARY_ALIASES.get(source_library, {source_library})
 
     if allowed_symbols:
         symbol_set = set(allowed_symbols)

@@ -439,20 +439,6 @@ class DiagnosisAgent:
                 )
                 continue
 
-            if rel_file.endswith(".py") and _should_keep_file_level_step(
-                project_dir / rel_file, source_library
-            ):
-                cloned = dict(step)
-                cloned["step_id"] = f"step_{next_index:03d}"
-                cloned["allowed_symbols"] = []
-                split_steps.append(cloned)
-                next_index += 1
-                warnings.append(
-                    f"Kept {rel_file} as a file-level step because its pandas "
-                    "functions are coupled through shared helper calls."
-                )
-                continue
-
             if not rel_file.endswith(".py") or step.get("allowed_symbols"):
                 cloned = dict(step)
                 cloned["step_id"] = f"step_{next_index:03d}"
@@ -468,13 +454,22 @@ class DiagnosisAgent:
                 next_index += 1
                 continue
 
-            warnings.append(
-                f"Split {rel_file} into {len(symbols)} symbol-level migration steps."
-            )
-            for symbol in symbols:
+            call_graph = _symbol_call_graph(project_dir / rel_file, source_library)
+            ordered = _topological_symbol_order(symbols, call_graph)
+            if ordered is not None:
+                warnings.append(
+                    f"Split {rel_file} into {len(ordered)} symbol-level steps "
+                    "in producer-consumer order (intra-file dependency detected)."
+                )
+            else:
+                ordered = symbols
+                warnings.append(
+                    f"Split {rel_file} into {len(symbols)} symbol-level migration steps."
+                )
+            for symbol in ordered:
                 cloned = dict(step)
                 cloned["step_id"] = f"step_{next_index:03d}"
-                cloned["description"] = f"Migrate symbol {symbol} in {rel_file}."
+                cloned["description"] = f"Migrate {symbol} in {rel_file}."
                 cloned["allowed_symbols"] = [symbol]
                 split_steps.append(cloned)
                 next_index += 1
@@ -629,61 +624,102 @@ def _group_cross_file_flow_steps(
     step_by_file = {step["file"]: step for step in steps}
     used_files: set[str] = set()
     grouped_steps: list[dict[str, Any]] = []
+
     for files, reason in grouped_files:
         present_files = [file for file in files if file in step_by_file]
         if len(present_files) <= 1:
             continue
-        primary = dict(step_by_file[present_files[0]])
+
+        ordered = _file_dependency_order(present_files, dataframe_flow)
+        primary = dict(step_by_file[ordered[0]])
         allowed_files: list[str] = []
-        for rel_file in present_files:
-            for allowed in step_by_file[rel_file].get("allowed_files", []):
-                if allowed not in allowed_files:
-                    allowed_files.append(allowed)
+        for rel_file in ordered:
+            for af in step_by_file[rel_file].get("allowed_files", []):
+                if af not in allowed_files:
+                    allowed_files.append(af)
             if rel_file not in allowed_files:
                 allowed_files.append(rel_file)
-        for dependency_file in dependency_files:
-            if dependency_file not in allowed_files:
-                allowed_files.append(dependency_file)
-        primary["file"] = present_files[0]
-        primary["files"] = present_files
+        for dep in dependency_files:
+            if dep not in allowed_files:
+                allowed_files.append(dep)
+        primary["file"] = ordered[0]
+        primary["files"] = ordered
         primary["allowed_files"] = allowed_files
         primary["allowed_symbols"] = []
         primary["description"] = (
-            "Migrate coupled DataFrame flow across files: "
-            + ", ".join(present_files)
-            + f". Reason: {reason}"
+            f"Migrate coupled DataFrame flow ({len(ordered)} files atomically). "
+            f"Reason: {reason}"
         )
         grouped_steps.append(primary)
-        used_files.update(present_files)
+        used_files.update(ordered)
         warnings.append(
-            "Grouped DataFrame flow files into one migration step: "
-            + ", ".join(present_files)
+            "Grouped DataFrame flow files into one atomic migration step: "
+            + ", ".join(ordered)
         )
 
     if not grouped_steps:
         return steps
 
     result: list[dict[str, Any]] = []
-    inserted_groups: set[tuple[str, ...]] = set()
     for step in steps:
-        rel_file = step["file"]
-        matching_group = next(
-            (
-                grouped
-                for grouped in grouped_steps
-                if rel_file in grouped.get("files", [])
-            ),
-            None,
-        )
-        if matching_group:
-            key = tuple(matching_group["files"])
-            if key not in inserted_groups:
-                result.append(matching_group)
-                inserted_groups.add(key)
-            continue
-        if rel_file not in used_files:
+        if step["file"] not in used_files:
             result.append(step)
-    return result
+    return grouped_steps + result
+
+
+def _file_dependency_order(
+    files: list[str],
+    dataframe_flow: dict[str, Any],
+) -> list[str]:
+    """Return *files* in topological order by cross-file producer-consumer links.
+
+    Reads ``consumes_dataframe_from`` edges from the DataFrameFlowAnalysis
+    symbols to discover which files must be migrated before others.  Falls back
+    to the original order on cycles or when no cross-file edges exist.
+    """
+    from collections import deque
+
+    file_set = set(files)
+    symbols = dataframe_flow.get("symbols", [])
+
+    symbol_to_file: dict[str, str] = {
+        s["symbol"]: s["file"]
+        for s in symbols
+        if s.get("symbol") and s.get("file") in file_set
+    }
+
+    # file_deps[consumer_file] = {producer_files it depends on}
+    file_deps: dict[str, set[str]] = {f: set() for f in files}
+    for sym in symbols:
+        consumer_file = sym.get("file")
+        if consumer_file not in file_set:
+            continue
+        for producer_sym in sym.get("consumes_dataframe_from", []):
+            producer_file = symbol_to_file.get(producer_sym)
+            if producer_file and producer_file != consumer_file:
+                file_deps[consumer_file].add(producer_file)
+
+    if not any(file_deps.values()):
+        return files
+
+    in_degree = {f: len(file_deps[f]) for f in files}
+    reverse: dict[str, set[str]] = {f: set() for f in files}
+    for consumer, producers in file_deps.items():
+        for producer in producers:
+            if producer in reverse:
+                reverse[producer].add(consumer)
+
+    queue: deque[str] = deque(f for f in files if in_degree[f] == 0)
+    result: list[str] = []
+    while queue:
+        f = queue.popleft()
+        result.append(f)
+        for consumer in sorted(reverse.get(f, set())):
+            in_degree[consumer] -= 1
+            if in_degree[consumer] == 0:
+                queue.append(consumer)
+
+    return result if len(result) == len(files) else files
 
 
 def _grouped_flow_files(dataframe_flow: dict[str, Any]) -> list[tuple[list[str], str]]:
@@ -769,6 +805,83 @@ def _library_aliases(tree: ast.AST, source_library: str) -> set[str]:
                 if alias.name == source_library:
                     aliases.add(alias.asname or source_library)
     return aliases
+
+
+def _symbol_call_graph(path: Path, source_library: str) -> dict[str, set[str]]:
+    """Return {caller: {callees}} among migratable symbols in *path*.
+
+    Only edges between symbols that actually use the source-library API are
+    included, so the graph captures producer-consumer relationships rather than
+    every helper call.
+    """
+    if not path.exists():
+        return {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return {}
+
+    aliases = _library_aliases(tree, source_library)
+    top_level = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    migratable = {
+        name
+        for name, node in top_level.items()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _symbol_uses_dataframe_api(node, aliases)
+    }
+    return {
+        name: {
+            callee
+            for callee in migratable
+            if callee != name and _calls_local_symbol(top_level[name], {callee})
+        }
+        for name in migratable
+    }
+
+
+def _topological_symbol_order(
+    symbols: list[str],
+    call_graph: dict[str, set[str]],
+) -> list[str] | None:
+    """Kahn's topological sort on the intra-file call graph.
+
+    Returns symbols ordered so producers come before consumers, or *None* when
+    no intra-file dependency edges exist (nothing to order).
+    """
+    symbol_set = set(symbols)
+    edges = {
+        sym: {dep for dep in call_graph.get(sym, set()) if dep in symbol_set}
+        for sym in symbols
+    }
+    if not any(edges.values()):
+        return None
+
+    in_degree = {sym: len(edges[sym]) for sym in symbols}
+    reverse: dict[str, set[str]] = {sym: set() for sym in symbols}
+    for sym, deps in edges.items():
+        for dep in deps:
+            reverse[dep].add(sym)
+
+    from collections import deque
+    queue: deque[str] = deque(
+        sym for sym in symbols if in_degree[sym] == 0
+    )
+    result: list[str] = []
+    while queue:
+        sym = queue.popleft()
+        result.append(sym)
+        for consumer in sorted(reverse[sym]):
+            in_degree[consumer] -= 1
+            if in_degree[consumer] == 0:
+                queue.append(consumer)
+
+    if len(result) != len(symbols):
+        return None  # cycle — fall back to unordered
+    return result
 
 
 def _should_keep_file_level_step(path: Path, source_library: str = "pandas") -> bool:

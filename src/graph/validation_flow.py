@@ -129,7 +129,12 @@ def build_validation_node(
 
         retry_counts = dict(graph_state["retry_counts"])
         retry_counts[step_id] = retry_counts.get(step_id, 0) + 1
-        if retry_counts[step_id] >= MAX_STEP_RETRIES or verdict["retry_recommendation"] == "stop":
+        upstream_failed = step.get("upstream_failed_files", [])
+        if (
+            retry_counts[step_id] >= MAX_STEP_RETRIES
+            or verdict["retry_recommendation"] == "stop"
+            or upstream_failed
+        ):
             _restore_project_dir(snapshot_dir, graph_state["project_dir"])
             marked_files = _mark_manual_review_required(
                 graph_state["project_dir"],
@@ -137,6 +142,13 @@ def build_validation_node(
                 verdict,
                 retry_counts[step_id],
             )
+            rationale = verdict["rationale"]
+            if upstream_failed:
+                rationale = (
+                    f"Upstream producer file(s) {upstream_failed} failed to migrate "
+                    "and still return source-library DataFrames; this step cannot "
+                    "succeed until its dependencies are migrated. " + rationale
+                )
             updates["retry_counts"] = retry_counts
             updates["failed_steps"] = [
                 *graph_state["failed_steps"],
@@ -146,7 +158,7 @@ def build_validation_node(
                     "manual_review_files": marked_files,
                     "verdict": verdict["verdict"],
                     "attempts": retry_counts[step_id],
-                    "rationale": verdict["rationale"],
+                    "rationale": rationale,
                     "feedback_for_agent": verdict["feedback_for_agent"],
                 },
             ]
