@@ -20,6 +20,9 @@ O objetivo é estudar a viabilidade de automatizar migrações de bibliotecas pr
 ### Integrações
 - [Integrações](integrations.md) — LLM providers, dependências externas, formato de experimentos
 
+### Roadmap
+- [Melhorias Sugeridas](improvements.md) — Otimizações priorizadas para próximas iterações
+
 ## Início Rápido
 
 ```bash
