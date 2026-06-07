@@ -50,8 +50,8 @@ Before choosing `approved`, verify each of these points internally:
 
 
 class ImplementationIssue(BaseModel):
-    kind: str = Field(description="Short issue category.")
-    file: str = Field(description="Affected file.")
+    kind: str = Field(default="unspecified", description="Short issue category.")
+    file: str = Field(default="", description="Affected file.")
     symbol: str = Field(default="", description="Affected function/class if known.")
     explanation: str = Field(description="Why this is a migration risk.")
 

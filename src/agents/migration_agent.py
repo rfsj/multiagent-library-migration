@@ -547,14 +547,32 @@ class MigrationAgent:
                 f"Step {step['step_id']} targets requirements.txt, "
                 "but no target_library was provided by diagnosis."
             )
-        if self._requirements_contains_package(source, target_library):
-            return source
-        suffix = "" if source.endswith("\n") else "\n"
-        if self._uses_hash_locked_requirements(source):
+        result = self._remove_package_from_requirements(source, step.get("source_library", ""))
+        if self._requirements_contains_package(result, target_library):
+            return result
+        suffix = "" if result.endswith("\n") else "\n"
+        if self._uses_hash_locked_requirements(result):
             dependency = self._resolve_hashed_requirement(target_library)
         else:
             dependency = target_library
-        return source + suffix + dependency + "\n"
+        return result + suffix + dependency + "\n"
+
+    def _remove_package_from_requirements(self, source: str, package_name: str) -> str:
+        if not package_name:
+            return source
+        normalized = _normalize_package_name(package_name)
+        lines = source.splitlines(keepends=True)
+        filtered = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                filtered.append(line)
+                continue
+            match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", stripped)
+            if match and _normalize_package_name(match.group("name")) == normalized:
+                continue
+            filtered.append(line)
+        return "".join(filtered)
 
     def _requirements_contains_package(self, source: str, package_name: str) -> bool:
         normalized_package = _normalize_package_name(package_name)
