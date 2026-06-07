@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -37,6 +38,20 @@ Review the migration step and return a structured verdict.
 """
 
 
+class EvidenceSummary(BaseModel):
+    tests_passed: bool = Field(default=False)
+    out_of_scope_files: list[str] = Field(default_factory=list)
+    imports_remaining: int = Field(default=0)
+    api_calls_remaining: int = Field(default=0)
+    upstream_skipped: bool = Field(default=False)
+
+
+class ActionableFeedback(BaseModel):
+    failure_location: str = Field(default="", description="file:line or empty.")
+    failure_description: str = Field(default="", description="What went wrong.")
+    suggested_correction: str = Field(default="", description="What should change.")
+
+
 class ValidationVerdict(BaseModel):
     step_id: str = Field(description="Step identifier being reviewed.")
     verdict: Literal["accepted", "rejected_implementation", "rejected_plan"] = Field(
@@ -54,6 +69,14 @@ class ValidationVerdict(BaseModel):
     )
     confidence: Literal["high", "medium", "low"] = Field(
         description="Confidence level for the verdict."
+    )
+    evidence_summary: EvidenceSummary = Field(
+        default_factory=EvidenceSummary,
+        description="Structured summary of the deterministic evidence examined.",
+    )
+    actionable_feedback: ActionableFeedback = Field(
+        default_factory=ActionableFeedback,
+        description="Structured breakdown of the concrete problem and expected correction.",
     )
 
 
@@ -275,11 +298,11 @@ class ValidationAgent:
 
     def _get_chain(self):
         if self._chain is None:
-            system_prompt = (_PROMPTS_DIR / "validation_agent_v1.md").read_text(encoding="utf-8")
+            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(encoding="utf-8")
             llm = get_llm().with_structured_output(ValidationVerdict)
             self._chain = (
                 ChatPromptTemplate.from_messages([
-                    ("system", system_prompt),
+                    SystemMessage(content=system_prompt),
                     ("human", _HUMAN_TEMPLATE),
                 ])
                 | llm

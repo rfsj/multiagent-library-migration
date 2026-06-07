@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import ast
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.llm import get_llm
 from src.tools.project_scanner import build_project_audit, scan_project
@@ -61,41 +63,145 @@ stage.
 
 
 # ---------------------------------------------------------------------------
-# Output schema
+# Output schema — v2
 # ---------------------------------------------------------------------------
 
-class MigrationStep(BaseModel):
-    step_id: str = Field(
-        description="Unique step identifier in the format step_001, step_002, ..."
-    )
-    file: str = Field(
-        description="File path relative to the repository root."
-    )
-    files: list[str] = Field(
-        default_factory=list,
-        description="Optional grouped files to migrate atomically in this step.",
-    )
-    description: str = Field(
-        description="Human-readable summary of the migration intent for this file."
-    )
-    allowed_files: list[str] = Field(
-        description=(
-            "Files the MigrationAgent is allowed to modify in this step. "
-            "Typically the affected file only; add requirements.txt if a "
-            "dependency change is needed."
-        )
-    )
-    allowed_symbols: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Optional function or class names this step is allowed to migrate inside file."
-        ),
-    )
-    status: str = Field(
-        default="planned",
-        description="Always 'planned'.",
-    )
+class ApiUsage(BaseModel):
+    symbol: str = Field(default="")
+    line: int = Field(default=0)
+    api_call: str = Field(default="")
+    has_polars_equivalent: bool = Field(default=True)
 
+
+class AffectedFile(BaseModel):
+    file: str = Field(description="Relative path of the affected production file.")
+    complexity: str = Field(default="low", description="low | medium | high")
+    risk_level: str = Field(default="low", description="low | medium | high")
+    risk_factors: list[str] = Field(default_factory=list)
+    imports: list[dict] = Field(default_factory=list)
+    api_usages: list[ApiUsage] = Field(default_factory=list)
+
+
+class TestFile(BaseModel):
+    file: str = Field(default="")
+    detection_method: str = Field(default="")
+    uses_source_library: bool = Field(default=False)
+    related_production_symbols: list[str] = Field(default_factory=list)
+
+
+class ApiMapping(BaseModel):
+    from_api: str = Field(default="", alias="from")
+    to_api: str = Field(default="", alias="to")
+    confidence: str = Field(default="high")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class AmbiguousApi(BaseModel):
+    api_call: str = Field(default="")
+    line: int = Field(default=0)
+    reason: str = Field(default="")
+
+
+class StepDataFrameFlow(BaseModel):
+    producers: list[str] = Field(default_factory=list)
+    consumers: list[str] = Field(default_factory=list)
+    coupled_with: list[str] = Field(default_factory=list)
+
+
+class MigrationStep(BaseModel):
+    step_id: str = Field(description="Unique step identifier: step_001, step_002, ...")
+    status: str = Field(default="planned")
+    step_type: str = Field(default="single_file", description="single_symbol | single_file | grouped")
+    file: str = Field(description="Primary file path relative to the repository root.")
+    files: list[str] = Field(default_factory=list, description="All files in this step.")
+    description: str = Field(description="Human-readable summary of the migration intent.")
+    allowed_files: list[str] = Field(description="Files the MigrationAgent may modify.")
+    allowed_symbols: list[str] = Field(default_factory=list)
+    complexity: str = Field(default="low", description="low | medium | high")
+    risk_level: str = Field(default="low", description="low | medium | high")
+    risk_factors: list[str] = Field(default_factory=list)
+    requires_human_review: bool = Field(default=False)
+    human_review_reasons: list[str] = Field(default_factory=list)
+    dataframe_flow_analysis: Optional[StepDataFrameFlow] = Field(default=None)
+    api_mappings_needed: list[ApiMapping] = Field(default_factory=list)
+    ambiguous_apis: list[AmbiguousApi] = Field(default_factory=list)
+    upstream_dependencies: list[str] = Field(default_factory=list)
+    upstream_failed_files: list[str] = Field(default_factory=list)
+    related_tests: list[str] = Field(default_factory=list)
+    validation_commands: list[str] = Field(default_factory=list)
+
+
+class DataFrameFlowEntry(BaseModel):
+    producer_file: str = Field(default="")
+    producer_symbol: str = Field(default="")
+    consumer_file: str = Field(default="")
+    consumer_symbol: str = Field(default="")
+    confidence: str = Field(default="medium")
+    evidence: str = Field(default="")
+
+
+class CoupledGroup(BaseModel):
+    group_id: str = Field(default="")
+    files: list[str] = Field(default_factory=list)
+    reason: str = Field(default="")
+    confidence: str = Field(default="medium")
+
+
+class DependencyAnalysis(BaseModel):
+    source_library_present: bool = Field(default=True)
+    target_library_present: bool = Field(default=False)
+    dependency_files_found: list[str] = Field(default_factory=list)
+    dependency_update_required: bool = Field(default=False)
+    dependency_file_to_update: Optional[str] = Field(default=None)
+    notes: str = Field(default="")
+
+
+class ResearchMetricsSupport(BaseModel):
+    predicted_files_changed: list[str] = Field(default_factory=list)
+    predicted_symbols_changed: list[str] = Field(default_factory=list)
+    ambiguous_api_count: int = Field(default=0)
+    unmigratable_api_count: int = Field(default=0)
+
+
+class DiagnosisPlan(BaseModel):
+    source_library: str = Field(description="Library being migrated from.")
+    target_library: str = Field(description="Library being migrated to.")
+    # v1 compat fields (may be empty when v2 detail fields are present)
+    dependency_files: list[str] = Field(
+        default_factory=list,
+        description="Flat list of dependency file paths found (for backward compat).",
+    )
+    affected_files: list[AffectedFile] = Field(
+        default_factory=list,
+        description="Production files that import or call the source library.",
+    )
+    related_tests: list[str] = Field(
+        default_factory=list,
+        description="Test file paths associated with affected source files.",
+    )
+    complexity: dict = Field(
+        default_factory=dict,
+        description="Complexity per affected file (legacy). Prefer per-step complexity.",
+    )
+    migration_steps: list[MigrationStep] = Field(
+        description="Ordered list of migration steps for the MigrationAgent."
+    )
+    # v2 additions
+    dependency_analysis: Optional[DependencyAnalysis] = Field(default=None)
+    test_files: list[TestFile] = Field(default_factory=list)
+    dataframe_flow: list[DataFrameFlowEntry] = Field(default_factory=list)
+    coupled_groups: list[CoupledGroup] = Field(default_factory=list)
+    human_review_required: bool = Field(default=False)
+    human_review_reasons: list[str] = Field(default_factory=list)
+    research_metrics_support: Optional[ResearchMetricsSupport] = Field(default=None)
+    assumptions: list[str] = Field(default_factory=list)
+    unknowns: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Flow analysis schema (separate LLM call)
+# ---------------------------------------------------------------------------
 
 class DataFrameFlowSymbol(BaseModel):
     file: str = Field(description="File path relative to the repository root.")
@@ -143,24 +249,6 @@ class DataFrameFlowAnalysis(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
-class DiagnosisPlan(BaseModel):
-    source_library: str = Field(description="Library being migrated from.")
-    target_library: str = Field(description="Library being migrated to.")
-    dependency_files: list[str] = Field(description="Dependency files found in the project.")
-    affected_files: list[str] = Field(
-        description="Production files that import or call the source library."
-    )
-    related_tests: list[str] = Field(
-        description="Test files associated with the affected source files."
-    )
-    complexity: dict[str, str] = Field(
-        description="Complexity per affected file. Values: 'low', 'medium', or 'high'."
-    )
-    migration_steps: list[MigrationStep] = Field(
-        description="Ordered list of migration steps for the MigrationAgent."
-    )
-
-
 # ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
@@ -171,25 +259,26 @@ class DiagnosisAgent:
     name = "diagnosis_agent"
 
     def __init__(self) -> None:
-        system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v1.md").read_text(encoding="utf-8")
+        system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v2.md").read_text(encoding="utf-8")
 
-        llm = get_llm().with_structured_output(DiagnosisPlan)
-        flow_llm = get_llm().with_structured_output(DataFrameFlowAnalysis)
+        raw_llm = get_llm()
+        flow_llm = raw_llm.with_structured_output(DataFrameFlowAnalysis)
 
-        self._chain = (
-            ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", _HUMAN_TEMPLATE),
-            ])
-            | llm
-        )
-        self._flow_chain = (
-            ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", _FLOW_HUMAN_TEMPLATE),
-            ])
-            | flow_llm
-        )
+        prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_prompt),
+            ("human", _HUMAN_TEMPLATE),
+        ])
+        # Use StrOutputParser so we always get the raw text and parse manually.
+        # with_structured_output returns None for complex schemas when the model
+        # generates JSON text instead of a function call.
+        self._chain = prompt | raw_llm | StrOutputParser()
+
+        flow_prompt = ChatPromptTemplate.from_messages([
+            SystemMessage(content=system_prompt),
+            ("human", _FLOW_HUMAN_TEMPLATE),
+        ])
+        self._flow_chain = flow_prompt | flow_llm
+        self._raw_flow_chain = flow_prompt | raw_llm | StrOutputParser()
 
     def run(
         self,
@@ -209,13 +298,25 @@ class DiagnosisAgent:
         )
 
         file_contents = self._collect_file_contents(project_dir, scan["affected_source_files"])
-        dataframe_flow: DataFrameFlowAnalysis = self._flow_chain.invoke({
+        flow_payload = {
             "source_library": source_library,
             "target_library": target_library,
             "file_contents": file_contents,
             "dependency_files": scan["dependency_files"],
             "affected_source_files": scan["affected_source_files"],
-        })
+        }
+        dataframe_flow: Optional[DataFrameFlowAnalysis] = self._flow_chain.invoke(flow_payload)
+        if dataframe_flow is None:
+            # Fallback: parse raw text if function calling returned nothing
+            raw_text: str = self._raw_flow_chain.invoke(flow_payload)
+            try:
+                raw_text = raw_text.strip()
+                if raw_text.startswith("```"):
+                    lines = raw_text.splitlines()
+                    raw_text = "\n".join(l for l in lines if not l.startswith("```")).strip()
+                dataframe_flow = DataFrameFlowAnalysis.model_validate(json.loads(raw_text))
+            except Exception:
+                dataframe_flow = DataFrameFlowAnalysis()
         flow_log_name = "dataframe_flow_analysis.json" if replan_attempt == 0 else f"dataframe_flow_analysis_replan_{replan_attempt}.json"
         dataframe_flow_payload = dataframe_flow.model_dump()
         (logs_dir / flow_log_name).write_text(
@@ -248,14 +349,29 @@ class DiagnosisAgent:
             dataframe_flow_payload,
         )
 
+        # Derive flat dependency_files list from v2 dependency_analysis when present
+        dep_files = result.dependency_files or []
+        if not dep_files and result.dependency_analysis:
+            dep_files = result.dependency_analysis.dependency_files_found or []
+
+        # Derive flat affected_files list for downstream compat (v2 returns objects)
+        affected_files_flat = [
+            af.file if hasattr(af, "file") else str(af)
+            for af in (result.affected_files or [])
+        ]
+
         plan = {
             "agent": self.name,
             "source_library": result.source_library,
             "target_library": result.target_library,
             "read_only": True,
-            "dependency_files": result.dependency_files,
+            "dependency_files": dep_files,
             "dependency_summary": audit["dependency_summary"],
-            "affected_files": result.affected_files,
+            "affected_files": affected_files_flat,
+            "affected_files_detail": [
+                af.model_dump() if hasattr(af, "model_dump") else af
+                for af in (result.affected_files or [])
+            ],
             "affected_source_files": scan["affected_source_files"],
             "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
             "related_tests": result.related_tests,
@@ -263,7 +379,14 @@ class DiagnosisAgent:
             "dataframe_flow_analysis": dataframe_flow_payload,
             "planner_warnings": planner_warnings,
             "migration_steps": migration_steps,
+            # v2 additions
+            "human_review_required": result.human_review_required,
+            "human_review_reasons": result.human_review_reasons,
+            "assumptions": result.assumptions,
+            "unknowns": result.unknowns,
         }
+        if result.research_metrics_support:
+            plan["research_metrics_support"] = result.research_metrics_support.model_dump()
 
         log_name = "diagnosis_plan.json" if replan_attempt == 0 else f"diagnosis_plan_replan_{replan_attempt}.json"
         (logs_dir / log_name).write_text(
@@ -288,7 +411,8 @@ class DiagnosisAgent:
     ) -> DiagnosisPlan:
         attempts = []
         for attempt in range(1, 3):
-            result = self._chain.invoke(payload)
+            text: str = self._chain.invoke(payload)
+            result = self._parse_plan_text(text)
             if result is not None:
                 if attempts:
                     attempts.append({"attempt": attempt, "status": "success"})
@@ -297,22 +421,38 @@ class DiagnosisAgent:
             attempts.append(
                 {
                     "attempt": attempt,
-                    "status": "empty_structured_output",
+                    "status": "json_parse_failed",
                     "action": "retry" if attempt == 1 else "fail",
+                    "text_preview": text[:200] if text else "",
                 }
             )
             payload = {
                 **payload,
                 "replan_context": (
                     f"{payload.get('replan_context', '')}\n\n"
-                    "The previous structured planner call returned no object. "
-                    "Return a valid DiagnosisPlan object with migration_steps."
+                    "The previous response could not be parsed as a valid migration plan. "
+                    "Ensure every migration_steps entry includes the 'file' field. "
+                    "Return a complete, valid DiagnosisPlan with migration_steps."
                 ).strip(),
             }
         self._write_planner_retry_log(logs_dir, replan_attempt, attempts)
         raise RuntimeError(
             "DiagnosisAgent could not obtain a structured migration plan after retry."
         )
+
+    def _parse_plan_text(self, text: str) -> Optional[DiagnosisPlan]:
+        """Parse raw LLM text into a DiagnosisPlan, stripping markdown fences."""
+        if not text:
+            return None
+        text = text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            text = "\n".join(l for l in lines if not l.startswith("```")).strip()
+        try:
+            data = json.loads(text)
+            return DiagnosisPlan.model_validate(data)
+        except Exception:
+            return None
 
     def _write_planner_retry_log(
         self,

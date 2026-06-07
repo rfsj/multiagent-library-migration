@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.llm import get_llm
 
@@ -50,10 +51,18 @@ Before choosing `approved`, verify each of these points internally:
 
 
 class ImplementationIssue(BaseModel):
-    kind: str = Field(default="unspecified", description="Short issue category.")
+    kind: str = Field(default="unspecified", description="Short issue category (e.g. check ID from v2 prompt).")
     file: str = Field(default="", description="Affected file.")
     symbol: str = Field(default="", description="Affected function/class if known.")
     explanation: str = Field(description="Why this is a migration risk.")
+    revision_instruction: str = Field(
+        default="",
+        description="Concrete actionable instruction for the Migration Agent to fix this issue.",
+    )
+    severity: Literal["blocking", "warning"] = Field(
+        default="blocking",
+        description="blocking: will cause test failure; warning: likely issue.",
+    )
 
 
 class ImplementationReviewResult(BaseModel):
@@ -63,9 +72,27 @@ class ImplementationReviewResult(BaseModel):
     issues: list[ImplementationIssue] = Field(default_factory=list)
     revision_instructions: str = Field(
         default="",
-        description="Concrete instructions for revising the migration.",
+        description="Aggregate revision instructions (top-level fallback; prefer per-issue revision_instruction).",
     )
     confidence: Literal["low", "medium", "high"] = "medium"
+    scope_applied: str = Field(
+        default="",
+        description="Description of what scope was checked (e.g. 'symbols: load_orders, paid_orders').",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Non-blocking observations that do not trigger needs_revision.",
+    )
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clean_confidence(cls, v: str) -> str:
+        raw = str(v).strip().lower()
+        # Take the first token when the LLM repeats values (e.g. "high,high,high")
+        for token in raw.replace(",", " ").split():
+            if token in ("low", "medium", "high"):
+                return token
+        return "medium"
 
 
 class ImplementationReviewAgent:
@@ -74,14 +101,14 @@ class ImplementationReviewAgent:
     name = "implementation_review_agent"
 
     def __init__(self) -> None:
-        system_prompt = (_PROMPTS_DIR / "implementation_review_agent_v1.md").read_text(
+        system_prompt = (_PROMPTS_DIR / "implementation_review_agent_v2.md").read_text(
             encoding="utf-8"
         )
         llm = get_llm().with_structured_output(ImplementationReviewResult)
         self._chain = (
             ChatPromptTemplate.from_messages(
                 [
-                    ("system", system_prompt),
+                    SystemMessage(content=system_prompt),
                     ("human", _HUMAN_TEMPLATE),
                 ]
             )

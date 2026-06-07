@@ -5,9 +5,10 @@ import json
 import re
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -50,12 +51,26 @@ Return ONLY the complete migrated file, preserving all untouched code outside th
 """
 
 
+class UnmigratedPattern(BaseModel):
+    line: int = Field(default=0, description="Line number in the original file.")
+    api_call: str = Field(default="", description="Source-library API call that could not be migrated.")
+    reason: str = Field(default="", description="Why no target-library equivalent exists.")
+
+
 class MigrationResult(BaseModel):
     migrated_code: str = Field(
         description="The complete migrated file content, preserving all untouched code."
     )
     changes_summary: str = Field(
         description="Brief summary of the migration changes applied."
+    )
+    migrated_requirements: Optional[str] = Field(
+        default=None,
+        description="Updated requirements.txt content, or null if not changed by this step.",
+    )
+    unmigrated_patterns: list[UnmigratedPattern] = Field(
+        default_factory=list,
+        description="Source-library patterns that could not be migrated and require manual review.",
     )
 
 
@@ -65,11 +80,11 @@ class MigrationAgent:
     name = "migration_agent"
 
     def __init__(self, implementation_review_agent: ImplementationReviewAgent | None = None) -> None:
-        system_prompt = (_PROMPTS_DIR / "migration_agent_v1.md").read_text(encoding="utf-8")
+        system_prompt = (_PROMPTS_DIR / "migration_agent_v2.md").read_text(encoding="utf-8")
         llm = get_llm().with_structured_output(MigrationResult)
         self._chain = (
             ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
+                SystemMessage(content=system_prompt),
                 ("human", _HUMAN_TEMPLATE),
             ])
             | llm
@@ -77,10 +92,12 @@ class MigrationAgent:
         self._implementation_review_agent = (
             implementation_review_agent or ImplementationReviewAgent()
         )
+        self._current_unmigrated_patterns: list[dict[str, Any]] = []
 
 
     def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
+        self._current_unmigrated_patterns = []
         if step.get("files"):
             return self._run_grouped_step(project_dir, step, logs_dir)
 
@@ -116,6 +133,7 @@ class MigrationAgent:
             "changed_files": changed_files,
             "status": "completed" if changed_files else "no_change",
             "retry_feedback_received": bool(retry_feedback),
+            "unmigrated_patterns": self._current_unmigrated_patterns,
         }
         if total_attempts:
             result["structured_output_attempts"] = total_attempts
@@ -132,8 +150,11 @@ class MigrationAgent:
         step: dict[str, Any],
         logs_dir: Path,
     ) -> dict[str, Any]:
-        changed_files: list[str] = []
+        # Phase 1: migrate all files without writing to disk yet.
+        # This prevents partial state where A uses Polars but B still uses pandas.
+        pending: list[tuple[Path, str, str, str]] = []  # (path, original, migrated, rel_str)
         file_results: list[dict[str, Any]] = []
+
         for rel_file_str in step.get("files", []):
             file_step = {
                 **step,
@@ -144,29 +165,53 @@ class MigrationAgent:
             self._validate_step_scope(file_step, rel_file)
             target = project_dir / rel_file
             original = target.read_text(encoding="utf-8")
+
+            # Scope retry feedback to the current file so the LLM isn't confused
+            # by errors from sibling files (e.g., a pivot-table error in features.py
+            # passed verbatim to loaders.py causes structured-output failure).
+            file_retry_feedback = _scoped_retry_feedback(
+                step.get("retry_feedback"), rel_file_str
+            )
+
             migrated, file_attempts, file_error = self._migrate_file_with_llm(
                 rel_file,
                 original,
                 file_step,
-                step.get("retry_feedback"),
+                file_retry_feedback,
                 logs_dir,
             )
-            changed = migrated != original
-            if changed:
-                target.write_text(migrated, encoding="utf-8")
-                changed_files.append(str(rel_file))
+            pending.append((target, original, migrated, rel_file_str))
             file_results.append(
                 {
                     "file": str(rel_file),
-                    "changed": changed,
+                    "changed": migrated != original,
                     "structured_output_attempts": file_attempts,
                     "structured_output_error": file_error,
                 }
             )
 
-        if "requirements.txt" in step.get("allowed_files", []):
-            if self._migrate_allowed_requirements(project_dir, step):
-                changed_files.append("requirements.txt")
+        # Phase 2: write atomically — only if every file produced valid LLM output.
+        # A structured_output_error means the LLM gave up; writing the other files
+        # would leave the project in a broken inter-file state.
+        changed_files: list[str] = []
+        has_llm_failure = any(r["structured_output_error"] for r in file_results)
+
+        if not has_llm_failure:
+            for target, _original, migrated, rel_file_str in pending:
+                if migrated != _original:
+                    target.write_text(migrated, encoding="utf-8")
+                    changed_files.append(rel_file_str)
+
+            if "requirements.txt" in step.get("allowed_files", []):
+                if self._migrate_allowed_requirements(project_dir, step):
+                    changed_files.append("requirements.txt")
+
+        if has_llm_failure:
+            status = "llm_failure"
+        elif changed_files:
+            status = "completed"
+        else:
+            status = "no_change"
 
         result = {
             "agent": self.name,
@@ -177,7 +222,7 @@ class MigrationAgent:
             "changed": bool(changed_files),
             "changed_files": changed_files,
             "file_results": file_results,
-            "status": "completed" if changed_files else "no_change",
+            "status": status,
             "retry_feedback_received": bool(step.get("retry_feedback")),
         }
         (logs_dir / f"{step['step_id']}_migration.json").write_text(
@@ -327,6 +372,12 @@ class MigrationAgent:
             result: MigrationResult | None = self._chain.invoke(prompt_payload)
             migrated_code = getattr(result, "migrated_code", None)
             if isinstance(migrated_code, str):
+                patterns = getattr(result, "unmigrated_patterns", None)
+                if patterns:
+                    self._current_unmigrated_patterns = [
+                        p.model_dump() if hasattr(p, "model_dump") else dict(p)
+                        for p in patterns
+                    ]
                 return migrated_code, attempt, ""
 
         return source, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS, "MigrationAgent returned no structured output."
@@ -654,10 +705,23 @@ def _normalize_package_name(name: str) -> str:
 
 
 def _review_feedback_for_migration(review: dict[str, Any], migrated_code: str) -> str:
+    issues = review.get("issues", [])
+    per_issue_instructions = [
+        f"- [{issue.get('kind', 'issue')}] {issue.get('revision_instruction', '').strip()}"
+        for issue in issues
+        if issue.get("revision_instruction", "").strip()
+    ]
+    top_level = review.get("revision_instructions", "").strip()
+    if per_issue_instructions:
+        instructions_block = "\n".join(per_issue_instructions)
+    elif top_level:
+        instructions_block = top_level
+    else:
+        instructions_block = "Revise the migration to address the listed issues."
     return (
         "Implementation review requested a revision before validation.\n\n"
-        f"Issues:\n{json.dumps(review.get('issues', []), indent=2)}\n\n"
-        f"Revision instructions:\n{review.get('revision_instructions', '')}\n\n"
+        f"Issues:\n{json.dumps(issues, indent=2)}\n\n"
+        f"Revision instructions:\n{instructions_block}\n\n"
         "Previous migrated code:\n"
         "```python\n"
         f"{migrated_code}\n"
@@ -763,6 +827,37 @@ def _check_pep604_union_types(tree: ast.Module) -> str | None:
                     "or use Union[X, Y] from the typing module instead."
                 )
     return None
+
+
+def _scoped_retry_feedback(
+    retry_feedback: dict[str, Any] | str | None,
+    rel_file_str: str,
+) -> dict[str, Any] | str | None:
+    """Return retry feedback scoped to a specific file within a grouped step.
+
+    In grouped steps the same validation feedback is reused for all files, but
+    it may describe errors that belong only to a sibling file. Passing irrelevant
+    context (e.g. a pivot-table error) to a simple loader file confuses the LLM
+    and causes structured-output failures. We prefix the feedback with an explicit
+    "you are migrating <file>" anchor so the model stays on-task.
+    """
+    if not retry_feedback:
+        return retry_feedback
+    if isinstance(retry_feedback, dict):
+        original_text = retry_feedback.get("feedback_for_agent", "")
+        return {
+            **retry_feedback,
+            "feedback_for_agent": (
+                f"You are migrating `{rel_file_str}`. "
+                "Focus only on what needs to change in this file.\n\n"
+                + original_text
+            ),
+        }
+    return (
+        f"You are migrating `{rel_file_str}`. "
+        "Focus only on what needs to change in this file.\n\n"
+        + str(retry_feedback)
+    )
 
 
 def _pinned_runtime_dependency(requirement: str) -> tuple[str, str] | None:

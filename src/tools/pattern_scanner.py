@@ -200,11 +200,33 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
                 )
 
         elif attr == "pivot_table":
+            # Check if aggfunc="nunique" is used
+            aggfunc_kw = next(
+                (kw for kw in node.keywords if kw.arg == "aggfunc"),
+                None,
+            )
+            aggfunc_val = (
+                aggfunc_kw.value.value
+                if aggfunc_kw and isinstance(aggfunc_kw.value, ast.Constant)
+                else None
+            )
+            if aggfunc_val == "nunique":
+                return (
+                    "pivot_table_nunique",
+                    "pd.pivot_table(aggfunc='nunique') is NOT directly supported by Polars pivot. "
+                    "Pre-aggregate first: group_by([index_col, on_col]).agg(pl.col(values).n_unique().alias('n')), "
+                    "then pivot(values='n', index=index_col, on=on_col, aggregate_function='first').fill_null(0). "
+                    "CRITICAL: Polars pivot ALWAYS produces STRING column names even when the on-column contains integers. "
+                    "If tests check column names or dict keys as integers (e.g. {0: 2, 1: 0}), "
+                    "this cannot be satisfied in pure Polars — add to unmigrated_patterns and flag for manual review.",
+                )
             return (
                 "pivot_table",
                 "pd.pivot_table() → .pivot(on=col, aggregate_function='sum').fill_null(0); "
                 "then .select([index_cols] + sorted(value_cols)) to preserve column order; "
-                "filter null index values before pivoting if the index column is nullable",
+                "filter null index values before pivoting if the index column is nullable. "
+                "CRITICAL: Polars pivot ALWAYS produces STRING column names even when the on-column contains integers. "
+                "If tests check column names or dict keys as integers, add to unmigrated_patterns.",
             )
 
         elif attr == "reset_index":
@@ -243,6 +265,38 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
                 "how='outer' becomes how='full'",
             )
 
+        elif attr == "merge_asof":
+            return (
+                "merge_asof",
+                "pd.merge_asof(left, right, on='ts', by='grp', direction='backward', tolerance=pd.Timedelta(days=N)) → "
+                "left.join_asof(right, on='ts', by='grp', strategy='backward', tolerance=timedelta(days=N)); "
+                "REQUIRED: sort BOTH DataFrames by the on-column before calling join_asof — unsorted data causes ComputeError; "
+                "add 'from datetime import timedelta' at the top; "
+                "direction='backward'→strategy='backward', direction='forward'→strategy='forward'; "
+                "pd.Timedelta(days=N)→timedelta(days=N) (stdlib timedelta, NOT polars duration)",
+            )
+
+        elif attr == "resample":
+            return (
+                "resample",
+                ".groupby(grp).resample('D').agg(close=('price','last'), vol=('v','sum')) → "
+                "ticks.sort(['timestamp', grp]).group_by_dynamic('timestamp', every='1d', group_by=grp)"
+                ".agg([pl.col('price').last().alias('close'), pl.col('v').sum().alias('vol')]); "
+                "REQUIRED: sort by timestamp (and group column) BEFORE group_by_dynamic or you get ComputeError; "
+                "CRITICAL: group_by_dynamic does NOT fill missing dates — pandas resample fills gaps with NaN rows. "
+                "To replicate gap-filling: (1) build a date grid (pl.date_range + symbols cross join), "
+                "(2) left-join the aggregated data onto the grid, "
+                "(3) forward-fill with pl.col('close').forward_fill().over(grp); "
+                "output column order may differ — use .select([grp, 'timestamp', ...]) to fix",
+            )
+
+        elif attr == "pct_change":
+            return (
+                "pct_change",
+                ".pct_change() inside groupby → pl.col('x').pct_change().over('group_col').fill_null(0.0); "
+                "standalone: pl.col('x').pct_change().fill_null(0.0)",
+            )
+
         elif attr == "to_datetime":
             return (
                 "to_datetime",
@@ -252,6 +306,21 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
             )
 
         elif attr == "fillna":
+            method_kw = next((kw for kw in node.keywords if kw.arg == "method"), None)
+            if method_kw and isinstance(method_kw.value, ast.Constant):
+                method_val = method_kw.value.value
+                if method_val == "ffill":
+                    return (
+                        "fillna_ffill",
+                        ".fillna(method='ffill') → .forward_fill(); "
+                        "inside a groupby context use pl.col('x').forward_fill().over('group_col')",
+                    )
+                if method_val == "bfill":
+                    return (
+                        "fillna_bfill",
+                        ".fillna(method='bfill') → .backward_fill(); "
+                        "inside a groupby context use pl.col('x').backward_fill().over('group_col')",
+                    )
             return (
                 "fillna",
                 ".fillna(v) → .fill_null(v)",
@@ -278,6 +347,37 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
                 "if negated (~.isin([...])) use .is_in([...]).not_()",
             )
 
+        elif attr == "copy":
+            return (
+                "copy_call",
+                ".copy() → DELETE this call; Polars DataFrames are immutable, "
+                ".copy() has no equivalent and must be removed",
+            )
+
+        elif attr == "strip" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "str":
+            return (
+                "str_strip",
+                ".str.strip() → .str.strip_chars(); "
+                "Polars has NO str.strip() — it does NOT exist; use .str.strip_chars() instead",
+            )
+
+        elif attr == "contains" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "str":
+            # Check if case=False is passed (case-insensitive contains)
+            has_case_false = any(
+                kw.arg == "case"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is False
+                for kw in node.keywords
+            )
+            if has_case_false:
+                return (
+                    "str_contains_case_insensitive",
+                    ".str.contains(keyword, case=False) → "
+                    "pl.col(x).str.to_lowercase().str.contains(keyword.lower()); "
+                    "Polars str.contains() has NO case= parameter — it does NOT exist; "
+                    "never use case=True or case_insensitive=True",
+                )
+
     # ~expr.isin(...) — explicit negated isin check
     if (
         isinstance(node, ast.UnaryOp)
@@ -290,6 +390,23 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
             "isin_negated",
             "~expr.isin([...]) → pl.col(...).is_in([...]).not_()",
         )
+
+    # df[mask] — boolean indexing for row filtering
+    # Column selection (df["col"] or df[["c1","c2"]]) is intentionally excluded.
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+        s = node.slice
+        is_string_col = isinstance(s, ast.Constant) and isinstance(s.value, str)
+        is_col_list = isinstance(s, ast.List) and all(
+            isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+            for elt in s.elts
+        )
+        if not is_string_col and not is_col_list:
+            return (
+                "boolean_indexing",
+                "df[mask] → df.filter(polars_expr); "
+                "NEVER write df[pl.col('x') == val] — Polars raises TypeError at runtime; "
+                "use df.filter(pl.col('x') == val) instead",
+            )
 
     # df["col"] = expr — index assignment to a DataFrame variable
     if (

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -61,6 +62,14 @@ class RepairPlan(BaseModel):
         description="Patterns the MigrationAgent must avoid in the retry.",
     )
     confidence: str = Field(default="medium", description="low, medium, or high.")
+    scope_note: str = Field(
+        default="",
+        description="Which files/symbols this repair targets and why.",
+    )
+    downstream_context: str = Field(
+        default="",
+        description="Note about failures outside allowed_files that should not be fixed in this retry.",
+    )
 
 
 class RepairAgent:
@@ -69,12 +78,12 @@ class RepairAgent:
     name = "repair_agent"
 
     def __init__(self) -> None:
-        system_prompt = (_PROMPTS_DIR / "repair_agent_v1.md").read_text(encoding="utf-8")
+        system_prompt = (_PROMPTS_DIR / "repair_agent_v2.md").read_text(encoding="utf-8")
         llm = get_llm().with_structured_output(RepairPlan)
         self._chain = (
             ChatPromptTemplate.from_messages(
                 [
-                    ("system", system_prompt),
+                    SystemMessage(content=system_prompt),
                     ("human", _HUMAN_TEMPLATE),
                 ]
             )

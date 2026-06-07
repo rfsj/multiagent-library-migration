@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import sys
@@ -23,7 +24,7 @@ def environment_versions() -> dict[str, str]:
         "polars": package_version("polars"),
         "pytest": package_version("pytest"),
         "langgraph": package_version("langgraph"),
-        "llm_model": "rule-based-mvp",
+        "llm_model": os.environ.get("LLM_MODEL", "unknown"),
     }
 
 
