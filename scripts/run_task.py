@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src import llm_proxy
 from src.agents.validation_agent import ValidationAgent
 from src.evaluation.metrics import build_metrics
 from src.evaluation.report_generator import environment_versions, git_commit, write_report
@@ -37,6 +38,7 @@ def main() -> int:
     logs_dir = run_dir / "logs"
     run_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
+    llm_proxy.configure(logs_dir / "llm_proxy.jsonl")
 
     shutil.copytree(task_dir / "input_project", project_dir)
     shutil.copytree(project_dir, before_dir)
