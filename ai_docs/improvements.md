@@ -81,6 +81,24 @@ Adicionar detecção de padrões ainda não cobertos em `src/tools/pattern_scann
 
 ---
 
+## Direção de Pesquisa
+
+### Antes de Expandir o AST Transformer: Medir o LLM Primeiro
+
+Existe um tradeoff importante antes de cobrir mais padrões deterministicamente: quanto mais o AST transformer faz, menos variação existe para estudar o comportamento do LLM — que é o objeto de pesquisa central do framework.
+
+A direção mais valiosa pode ser o inverso: usar o `llm_proxy.jsonl` (gerado em cada run) para **medir o quanto o LLM acerta sozinho antes do AST fallback**, identificar onde ele erra sistematicamente, e só então decidir se o erro merece virar regra determinística ou merece melhorar o prompt.
+
+**Como operacionalizar**:
+1. Rodar tasks com `MIGRATION_AST_FALLBACK=0` e registrar quais patterns o LLM erra
+2. Cruzar com o `llm_proxy.jsonl` para ver se o feedback das retries converge ou se o modelo trava no mesmo erro
+3. Classificar cada erro sistemático: é um problema de prompt (o LLM não recebeu a instrução certa) ou uma limitação do modelo (mesmo com instrução, erra)?
+4. Só transformar em regra AST os padrões onde o prompt não resolve — os demais devem virar melhorias de prompt/gotcha
+
+Isso evita que o AST transformer vire um workaround que mascara fraquezas do LLM que seriam interessantes de estudar.
+
+---
+
 ## Otimizações Experimentais
 
 ### 8. Registrar Modelo Usado por Step nos Logs

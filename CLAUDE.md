@@ -60,6 +60,7 @@ Cada execução gera em `experiments/runs/<task_id>_<timestamp>/`:
 - `report.json` — resultado final com métricas
 - `diff.patch` — todas as mudanças aplicadas
 - `logs/` — plano, migrations, validations, verdicts por step
+- `logs/llm_proxy.jsonl` — **todas as chamadas ao LLM** (request + response); inspecione aqui quando um agente produzir algo inesperado
 - `snapshots/` — estado do projeto em cada ponto
 
 `benchmark/` e `experiments/` são ignorados pelo git.

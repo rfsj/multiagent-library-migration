@@ -213,6 +213,50 @@ cat experiments/runs/task_001_*/logs/step_001_verdict.json
 cat experiments/runs/task_001_*/diff.patch
 ```
 
+#### Inspecionando chamadas ao LLM (`llm_proxy.jsonl`)
+
+Cada run gera `logs/llm_proxy.jsonl` com **todos os requests e responses** trocados com o LLM em ordem cronológica. Se um agente produziu algo errado, quebrou no meio ou gerou saída inesperada, este é o primeiro lugar para olhar — você vê exatamente o prompt que entrou e o payload bruto que voltou (incluindo `function_call` para structured output do Gemini e `tool_calls` para Anthropic).
+
+```bash
+# Contar quantas chamadas foram feitas
+wc -l experiments/runs/task_001_*/logs/llm_proxy.jsonl
+
+# Ver todos os prompts enviados (campo messages[0][1].content = human message)
+cat experiments/runs/task_001_*/logs/llm_proxy.jsonl \
+  | python3 -c "
+import sys, json
+for line in sys.stdin:
+    e = json.loads(line)
+    if e['event'] == 'request':
+        print('=== REQUEST', e['ts'], '===')
+        for msg in e['messages'][0]:
+            print(f\"[{msg['role']}]\", msg['content'][:300])
+        print()
+"
+
+# Ver a resposta bruta de uma chamada específica (ex: segunda resposta)
+python3 -c "
+import json
+lines = open('experiments/runs/task_001_*/logs/llm_proxy.jsonl').readlines()
+resps = [json.loads(l) for l in lines if json.loads(l)['event'] == 'response']
+print(json.dumps(resps[1], indent=2, ensure_ascii=False))
+"
+
+# Filtrar só erros de structured output (text vazio e sem function_call)
+cat experiments/runs/task_001_*/logs/llm_proxy.jsonl \
+  | python3 -c "
+import sys, json
+for line in sys.stdin:
+    e = json.loads(line)
+    if e['event'] == 'response':
+        gens = e.get('generations', [[]])[0]
+        if gens and not gens[0].get('text') and not gens[0].get('function_call') and not gens[0].get('tool_calls'):
+            print('EMPTY RESPONSE:', e['ts'], e['run_id'])
+"
+```
+
+> **Nota**: Respostas de structured output (`with_structured_output`) sempre chegam com `text: ""` — o payload real fica em `function_call.args` (Gemini) ou `tool_calls[0].function.arguments` (Anthropic). Isso é esperado.
+
 ### O Que Eu Gostaria de Ter Sabido
 
 - `MIGRATION_AST_FALLBACK=1` é essencial para modelos smaller (flash-lite, flash); sem ele, esses modelos falham consistentemente em column assignments
