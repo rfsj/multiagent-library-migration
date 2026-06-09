@@ -22,27 +22,12 @@
 
 **Solução**: Usar `gemini-3.1-flash-lite` + `MIGRATION_AST_FALLBACK=1` para tasks com arquivos maiores. Para task_002 (processing.py, ~250 linhas), o pro consistentemente trava.
 
----
 
-### G3 — unmigrated_uses=0 Não Garante Migração Correta
 
-**Sintoma**: Validation aceita um step mas o código migrado ainda tem APIs pandas que causam falha em runtime.
-
-**Causa**: `_ast_count_source_usage` conta apenas referências `pd.xxx` (atributos do alias da biblioteca). Chamadas de métodos pandas em variáveis locais (`.sort_values()`, `.groupby()`) não são contadas porque não têm o prefixo `pd.`.
-
-**Implicação**: Um step com `unmigrated_uses=0` pode ter `.sort_values()` ou `df["col"] = expr` e ainda passar essa checagem. O `pytest` é a verdadeira barreira de segurança.
-
-**Solução**: O `pattern_scanner.py` detecta esses padrões por nome de método e os inclui no prompt do LLM. O AST fallback resolve deterministicamente os que o LLM erra.
 
 ---
 
-### G4 — Modelo Gera Python 3.10+ Syntax em Projeto 3.9
 
-**Sintoma**: Validation rejeita com `Syntax error: X | Y union syntax causes TypeError at runtime on Python 3.9`.
-
-**Causa**: LLMs tendem a usar `str | None` (PEP 604) que é válido sintaticamente no 3.9 mas falha em runtime quando annotations são avaliadas.
-
-**Solução**: `MigrationAgent._validate_python39_syntax()` detecta esse padrão via AST e força retry com feedback: "adicione `from __future__ import annotations` ou use `Optional[str]`."
 
 ---
 
@@ -134,6 +119,130 @@ matrix = df.pivot(
 
 ---
 
+### G14 — Anti-Join com `indicator=True` Não Tem Equivalente Direto no Polars
+
+**Sintoma**: Step falha com `ColumnNotFoundError: unable to find column "customer_id_right"` após múltiplos retries, ou o resultado inclui `None` onde deveriam aparecer apenas IDs válidos.
+
+**Causa**: O padrão pandas de anti-join:
+```python
+merged = left.merge(right, on="key", how="left", indicator=True)
+result = merged[merged["_merge"] == "left_only"]
+```
+não tem equivalente direto em Polars. O LLM frequentemente tenta usar a coluna `key_right` como proxy para detectar não-matches, mas em Polars um left join sobre colunas de mesmo nome **não gera** `key_right` — a chave do lado direito é descartada e só fica a do lado esquerdo.
+
+**Solução correta em Polars**:
+```python
+# Opção 1: join anti-explícito (mais idiomático)
+result = left.join(right.select("key").unique(), on="key", how="anti")
+
+# Opção 2: is_in + filter
+matched_keys = right["key"].unique()
+result = left.filter(~pl.col("key").is_in(matched_keys))
+```
+
+**Onde aparece**: Qualquer função que usa `merge(..., how="left", indicator=True)` seguida de filtro em `_merge == "left_only"` — padrão comum em `customers_without_invoices`, deduplicação por chave externa, etc.
+
+**Task que expôs o bug**: `task_016_merge_multi_type` — `customers_without_invoices` e `all_billing_pairs` (outer join com chave nula descrita abaixo).
+
+---
+
+### G15 — Outer Join no Polars Perde a Chave do Lado Direito em Não-Matches
+
+**Sintoma**: Após outer join, registros que só existem na tabela da direita aparecem com `customer_id = None` em vez do valor real.
+
+**Causa**: Em pandas `merge(..., how="outer")`, a coluna de join é preenchida com o valor de qualquer lado que tenha match. Em Polars `join(..., how="full")`, a coluna de join fica com o valor do lado **esquerdo** — quando o left não tem match, ela é `null`.
+
+**Exemplo**:
+```python
+# pandas: C6 aparece com customer_id="C6"
+customers.merge(invoices, on="customer_id", how="outer")
+
+# polars (ERRADO): C6 aparece com customer_id=null
+customers.join(invoices, on="customer_id", how="full")
+
+# polars (CORRETO): coalescer manualmente
+result = customers.join(invoices, on="customer_id", how="full", coalesce=True)
+```
+
+**Nota**: `coalesce=True` (padrão no Polars ≥ 0.19) resolve em casos simples. Em joins com renaming (`suffix`), verificar se a coluna chave está sendo selecionada do lado correto.
+
+---
+
+### G16 — `DataFrame.loc` Não Existe em Polars
+
+**Sintoma**: `AttributeError: 'DataFrame' object has no attribute 'loc'` após migração parcial.
+
+**Causa**: Polars não tem indexação label-based via `.loc[label]` nem positional via `.iloc[pos]`. O LLM frequentemente gera código que remove o `import pandas as pd` mas deixa chamadas a `.loc[]` intactas, ou tenta usar `.loc` no objeto polars.
+
+**Padrões comuns e equivalentes**:
+```python
+# pandas: filtro por condição de coluna
+df.loc[df["status"] == "active"]
+# polars
+df.filter(pl.col("status") == "active")
+
+# pandas: seleção de colunas
+df.loc[:, ["a", "b"]]
+# polars
+df.select(["a", "b"])
+
+# pandas: atualizar valor por posição
+df.loc[idx, "col"] = value
+# polars: DataFrames são imutáveis — usar with_columns + when/then/otherwise
+
+# pandas: filtrar por índice de label
+df.loc["2024-01-01":"2024-03-31"]
+# polars: sem índice — usar filter com coluna de data explícita
+df.filter((pl.col("date") >= "2024-01-01") & (pl.col("date") <= "2024-03-31"))
+```
+
+**Onde aparece**: Qualquer código que usa `.loc` para filtrar, selecionar ou atualizar — muito comum em projetos com DataFrames usados como estruturas de lookup (ex: `fitter.py` usa `df.loc[nome_distribuicao]` para acessar resultados por índice de string).
+
+**Task que expôs**: `task_028_fitter` — `df_errors` é um DataFrame indexado por nome de distribuição; o código usa `.loc["gamma"]` para acessar erros por chave.
+
+---
+
+### G17 — `DataFrame.sort()` no Polars Não Aceita `key=` nem `categories=`
+
+**Sintoma**: `TypeError: sort() got an unexpected keyword argument 'categories'` ou `TypeError: sort() got an unexpected keyword argument 'key'`.
+
+**Causa**: Em pandas, `DataFrame.sort_values()` aceita `key=` (função aplicada antes do sort) e séries categóricas mantêm ordem de categoria ao ordenar. Em Polars, `DataFrame.sort()` não tem parâmetro `key=` nem lógica de categoria automática.
+
+**Solução**:
+```python
+# pandas: ordenar com função de chave
+df.sort_values("col", key=lambda s: s.str.lower())
+# polars
+df.sort(pl.col("col").str.to_lowercase())
+
+# pandas: ordenar preservando ordem categórica
+df["tier"] = pd.Categorical(df["tier"], categories=["low","mid","high"], ordered=True)
+df.sort_values("tier")
+# polars: ordenar com enum ou mapeamento numérico explícito
+order_map = {"low": 0, "mid": 1, "high": 2}
+df.with_columns(pl.col("tier").replace(order_map).alias("_sort_key")).sort("_sort_key").drop("_sort_key")
+```
+
+**Task que expôs**: `task_028_fitter` — `summary()` ordena resultados de fitting por erro usando `key=` implícito nas categorias pandas.
+
+---
+
+### G18 — Projetos Multi-Arquivo Grandes Esgotam Retries Sem Migração Completa
+
+**Sintoma**: `status: failed`, `tests_after: passed`, mas `unmigrated_uses > 0`. Os testes passam mas o framework rejeita porque pandas ainda está presente em algum arquivo.
+
+**Causa**: O DiagnosisAgent planeja um step por arquivo (ou grupo de arquivos acoplados). Se um projeto tem muitos arquivos com muitas referências pandas (ex: ta com 7 arquivos e 428 referências), o agente pode migrar os primeiros steps com sucesso mas esgotar os 3 retries em um step mais complexo — deixando outros arquivos sem migrar. O resultado final: testes passam (os arquivos não-migrados ainda são pandas válido), mas `old_imports_remaining > 0`.
+
+**Exemplo**: `task_027_ta` — 7 arquivos de indicadores técnicos, 428 referências pandas. O agente migrou parcialmente `trend.py` mas não conseguiu completar nos 3 retries, e os demais arquivos ficaram intactos.
+
+**Mitigações**:
+- Aumentar `MAX_RETRIES` para projetos grandes
+- Usar `gemini-2.5-pro` em vez de `flash-lite` para arquivos com muitas interdependências
+- Dividir projetos grandes em tasks menores (um módulo por task)
+- Considerar que projetos com > 5 arquivos migráveis têm risco elevado de migração incompleta com modelos menores
+
+---
+
 ## Comportamentos Não-Óbvios do Framework
 
 ### G10 — Testes Cross-File Quebram ao Migrar Produtores Individualmente
@@ -148,15 +257,6 @@ matrix = df.pivot(
 
 ---
 
-### G11 — report.json Sempre Mostra llm_model="rule-based-mvp"
-
-**Sintoma**: Campo `environment.llm_model` em `report.json` sempre é `"rule-based-mvp"`, independente do modelo usado.
-
-**Causa**: Hardcoded em `src/evaluation/report_generator.py:26`. O modelo real está no `.env` (`LLM_MODEL_NAME`), mas o campo de report não foi atualizado para lê-lo.
-
-**Workaround**: Verificar o `.env` da run para saber qual modelo foi usado. O `LLM_MODEL_NAME` do `.env` é apenas um metadado registrado pelo usuário, não lido pelo framework.
-
----
 
 ### G12 — benchmark/ É Ignorado pelo Git
 
@@ -175,6 +275,93 @@ matrix = df.pivot(
 **Causa**: `allowed_symbols=[]` é interpretado como "sem restrição de símbolo" = "arquivo inteiro é permitido". Isso é diferente de `allowed_symbols=["fn1"]` que limita a exatamente esse símbolo.
 
 **Contexto**: Steps gerados para arquivos de arquivos acoplados (`files=[...]`) sempre usam `allowed_symbols=[]` porque precisam migrar os arquivos por inteiro para manter coerência de tipo.
+
+---
+
+## Guia de Configuração Estratégica
+
+### G19 — Matriz de Decisão: Modelo × Complexidade de Task
+
+Não existe um modelo ideal para todos os casos. Use esta matriz para escolher:
+
+| Complexidade da task | Modelo recomendado | AST fallback | Risco |
+|---|---|---|---|
+| 1 arquivo, <100 linhas, padrões simples (filter, sort, groupby) | `gemini-3.1-flash-lite` | opcional | baixo |
+| 1 arquivo, 100–300 linhas, padrões variados | `gemini-3.1-flash-lite` | **obrigatório** | médio |
+| 2–3 arquivos acoplados, qualquer tamanho | `gemini-3.1-flash-lite` | **obrigatório** | médio |
+| 1 arquivo, >300 linhas, padrões complexos (`transform`, `apply`, `loc`) | `gemini-2.5-flash` | **obrigatório** | alto |
+| Projeto real com 5+ arquivos e >200 refs pandas | `gemini-2.5-pro` | obrigatório | muito alto — pro pode dar timeout |
+
+**Sinais de que o modelo escolhido é insuficiente**:
+- 3 retries sempre falhando no mesmo passo → troque para modelo maior
+- `unmigrated_uses > 0` depois de 3 retries → AST fallback não está ativado ou o padrão é fora do escopo do AST
+- Timeout silencioso no DiagnosisAgent → arquivo muito grande para o modelo (use flash-lite)
+
+**Regra prática validada** (tasks 001–028):
+> `gemini-3.1-flash-lite` + `MIGRATION_AST_FALLBACK=1` cobre >90% das tasks sintéticas. Para projetos reais com arquivos grandes ou padrões complexos (`transform`, `apply axis=1`, `.loc`), nem pro nem flash-lite garantem sucesso sem solução determinista adicional.
+
+---
+
+### G20 — O Que o AST Fallback Cobre (e o Que Não Cobre)
+
+O `MIGRATION_AST_FALLBACK=1` aplica transformações mecânicas **após** o LLM, como segunda camada de segurança. É determinístico e não usa tokens.
+
+**O que o AST resolve automaticamente**:
+- `df["col"] = expr` → `df = df.with_columns(expr.alias("col"))`
+- `.reset_index(drop=True)` → removido
+- `.sort_values("x")` → `.sort("x")`
+- `.sort_values("x", ascending=False)` → `.sort("x", descending=True)`
+
+**O que o AST NÃO resolve (precisa do LLM)**:
+
+| Padrão pandas | Por que o AST não cobre |
+|---|---|
+| `df.loc[mask]` / `df.iloc[n]` | Semântica depende do tipo de índice — não é mecânico |
+| `groupby().transform(func)` | Requer reescrita estrutural com `over()` |
+| `apply(func, axis=1)` | Requer análise da função para gerar `when/then/otherwise` |
+| `pd.cut(col, bins, labels)` | Requer `cut()` como método de coluna, não função de módulo |
+| `dt.to_period("M")` | Sem equivalente direto — requer `dt.strftime()` |
+| `expanding().mean()` | Requer substituição por `cum_mean()` |
+| `pd.concat([a, b], axis=1)` | Requer `pl.concat([a, b], how="horizontal")` com análise de alinhamento |
+| `Series.where(cond, other)` | Semântica invertida em relação ao `filter` — requer `when/then/otherwise` |
+| `merge(..., indicator=True)` | Anti-join precisa de `join(..., how="anti")` |
+
+**Implicação prática**: Ativar AST fallback é sempre seguro e melhora a taxa de sucesso para padrões simples. Para os padrões acima, o AST não ajuda — o sucesso depende inteiramente da qualidade do LLM escolhido e do número de retries.
+
+---
+
+### G21 — Soluções Deterministas vs LLM: Quando Confiar em Cada Uma
+
+O framework tem três camadas de transformação com garantias diferentes:
+
+**Camada 1 — Determinística pura (AST transformer)**
+- Confiança: 100% para os padrões cobertos
+- Velocidade: instantânea, sem tokens
+- Limite: só funciona para transformações mecânicas 1-para-1
+- Exemplos cobertos: G5, G1 (column assignment), sort direction
+
+**Camada 2 — Heurística estrutural (pattern_scanner)**
+- Confiança: alta para detecção, mas produz apenas *instruções* para o LLM
+- Velocidade: rápida, sem tokens
+- Limite: detecta padrões mas não os resolve — informa o LLM o que precisa mudar
+- Exemplos: dependent_column_assign (G6), método `.loc`, `transform`, `apply`
+
+**Camada 3 — LLM (MigrationAgent + RepairAgent)**
+- Confiança: variável (30–95% por step dependendo do modelo e complexidade)
+- Velocidade: lenta, consome tokens
+- Limite: não-determinístico; o mesmo prompt pode produzir resultados diferentes
+- Necessário para: toda lógica que requer entendimento semântico
+
+**Regra de ouro**:
+> Se o padrão tem uma tradução 1-para-1 que pode ser expressa como substituição de texto ou AST, use solução determinista. Se o padrão requer entender *o que o código está fazendo* (não apenas *como está escrito*), o LLM é necessário — e o número de retries e a qualidade do modelo importam muito.
+
+**Padrões que poderiam ter solução determinista mas ainda não têm** (candidatos para o AST transformer):
+- `.reset_index()` sem `drop=True` (precisa de lógica condicional)
+- `.fillna(method="ffill")` → `.forward_fill()`
+- `pd.to_datetime(col)` → `pl.col(col).str.to_datetime()`
+- `df.rename(columns={"a": "b"})` → `df.rename({"a": "b"})`
+
+Adicionar esses ao AST transformer aumentaria a taxa de sucesso sem custo de tokens.
 
 ---
 
