@@ -1,0 +1,10 @@
+{
+  "task_id": "task_009_apply_map",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate Series.apply with lambda functions and Series.map with a dict for element-wise transformations from pandas to Polars.",
+  "expected_changed_files": [
+    "src/employees/scoring.py",
+    "requirements.txt"
+  ]
+}

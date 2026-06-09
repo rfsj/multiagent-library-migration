@@ -1,0 +1,10 @@
+{
+  "task_id": "task_014_cut_where_assign",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate pd.cut for binning, np.where for conditional column creation, and df.assign for derived columns from pandas to Polars.",
+  "expected_changed_files": [
+    "src/products/pricing.py",
+    "requirements.txt"
+  ]
+}

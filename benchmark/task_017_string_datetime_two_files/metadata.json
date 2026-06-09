@@ -1,0 +1,11 @@
+{
+  "task_id": "task_017_string_datetime_two_files",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate string normalization (strip, lower, regex replace, concat, endswith) and datetime operations (pd.to_datetime, timedelta cutoff, strftime groupby) spread across two coupled CRM files from pandas to Polars.",
+  "expected_changed_files": [
+    "src/crm/contacts.py",
+    "src/crm/interactions.py",
+    "requirements.txt"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "task_020_full_analytics_pipeline",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a four-file retail analytics pipeline covering: ingestion (rename, fillna, to_datetime, pd.cut), enrichment (string strip/lower, np.where, datetime features), aggregation (multi-join groupby, rolling window), and reporting (pivot_table, multi-agg summary) from pandas to Polars.",
+  "expected_changed_files": [
+    "src/retail/ingestion.py",
+    "src/retail/enrichment.py",
+    "src/retail/aggregation.py",
+    "src/retail/reporting.py",
+    "requirements.txt"
+  ]
+}

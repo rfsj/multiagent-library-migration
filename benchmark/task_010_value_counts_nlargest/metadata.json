@@ -1,0 +1,10 @@
+{
+  "task_id": "task_010_value_counts_nlargest",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate value_counts, nlargest, nsmallest, and groupby nunique from pandas to Polars.",
+  "expected_changed_files": [
+    "src/reviews/stats.py",
+    "requirements.txt"
+  ]
+}

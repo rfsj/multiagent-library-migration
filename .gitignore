@@ -5,8 +5,7 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-benchmark/pyjanitor/
-benchmark/ydata_profiling
+
 experiments/runs/*
 !experiments/runs/.gitkeep
 experiments/old/

@@ -1,0 +1,11 @@
+{
+  "task_id": "task_026_hurst",
+  "project_dir": "/Users/rfsj/multiagent-library-migration/benchmark/task_026_hurst/input_project",
+  "mode": "apply",
+  "tests_before": "passed",
+  "tests_after": "passed",
+  "proposed_changes": [],
+  "applied_changes": [],
+  "status": "already_ready",
+  "policy": "Preparation is a separate pre-migration step. It may make the imported benchmark runnable, but it must not perform library migration."
+}

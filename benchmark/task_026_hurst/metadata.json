@@ -1,0 +1,9 @@
+{
+  "task_id": "task_026_hurst",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "GitHub project benchmark imported from https://github.com/Mottl/hurst.",
+  "source_repo": "https://github.com/Mottl/hurst",
+  "source_branch": null,
+  "expected_changed_files": []
+}

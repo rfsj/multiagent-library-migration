@@ -1,0 +1,10 @@
+{
+  "task_id": "task_013_melt_wide_to_long",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate melt (wide-to-long) with id_vars, value_vars, var_name and subsequent groupby aggregations from pandas to Polars.",
+  "expected_changed_files": [
+    "src/surveys/transform.py",
+    "requirements.txt"
+  ]
+}

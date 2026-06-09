@@ -1,0 +1,11 @@
+{
+  "task_id": "task_025_transform_apply_pipeline",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a two-file analytics pipeline combining groupby().transform() for group stats, apply(axis=1) for z-score and anomaly classification, dt.to_period('M') for period grouping, and transform('cumsum') for per-group running totals — all patterns that lack direct Polars equivalents and require structural rewriting.",
+  "expected_changed_files": [
+    "src/scoring/features.py",
+    "src/scoring/pipeline.py",
+    "requirements.txt"
+  ]
+}
