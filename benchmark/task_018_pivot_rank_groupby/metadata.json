@@ -1,0 +1,10 @@
+{
+  "task_id": "task_018_pivot_rank_groupby",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate pivot_table with fill_value and column name cleanup, groupby rank for per-group top-1 selection, and multi-aggregation groupby chain from pandas to Polars.",
+  "expected_changed_files": [
+    "src/warehouse/reports.py",
+    "requirements.txt"
+  ]
+}

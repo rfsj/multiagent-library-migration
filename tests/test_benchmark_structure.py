@@ -179,3 +179,210 @@ def test_diagnosis_deduplicates_api_level_steps_before_symbol_split(tmp_path):
         ["latest"],
     ]
     assert any("Deduplicated 2 redundant migration step(s)" in warning for warning in warnings)
+
+
+def test_diagnosis_flow_analysis_keeps_coupled_files_at_file_level(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "loaders.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def load_orders(path):\n"
+        "    return pd.read_csv(path)\n\n\n"
+        "def paid_orders(path):\n"
+        "    orders = load_orders(path)\n"
+        "    return orders[orders['status'] == 'paid']\n",
+        encoding="utf-8",
+    )
+    (source_dir / "summaries.py").write_text(
+        "from src.loaders import paid_orders\n\n\n"
+        "def revenue_by_region(path):\n"
+        "    paid = paid_orders(path)\n"
+        "    return paid.groupby('region').sum()\n\n\n"
+        "def monthly_product_matrix(path):\n"
+        "    paid = paid_orders(path)\n"
+        "    return paid.pivot_table(index='region')\n",
+        encoding="utf-8",
+    )
+
+    steps, warnings = DiagnosisAgent.__new__(DiagnosisAgent)._sanitize_migration_steps(
+        [
+            MigrationStep(
+                step_id="step_001",
+                file="src/loaders.py",
+                description="Migrate loaders.",
+                allowed_files=["src/loaders.py"],
+            ),
+            MigrationStep(
+                step_id="step_002",
+                file="src/summaries.py",
+                description="Migrate summaries.",
+                allowed_files=["src/summaries.py"],
+            ),
+        ],
+        ["src/loaders.py", "src/summaries.py"],
+        [],
+        {"target_dependency_action": "none"},
+        project_dir,
+        "pandas",
+        {
+            "groups": [
+                {
+                    "group_id": "flow_group_001",
+                    "files": ["src/loaders.py", "src/summaries.py"],
+                    "symbols": ["paid_orders", "revenue_by_region"],
+                    "reason": "summaries consumes DataFrames returned by loaders",
+                    "planning_strategy": "file_level_steps",
+                }
+            ]
+        },
+    )
+
+    assert [step["file"] for step in steps] == ["src/loaders.py", "src/summaries.py"]
+    assert [step["allowed_symbols"] for step in steps] == [[], []]
+    assert any("DataFrame flow analysis marked it as coupled" in warning for warning in warnings)
+
+
+def test_diagnosis_groups_cross_file_dataframe_flow_when_required(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "loaders.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def load_orders(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+    (source_dir / "summaries.py").write_text(
+        "from src.loaders import load_orders\n\n\n"
+        "def revenue_by_region(path):\n"
+        "    orders = load_orders(path)\n"
+        "    return orders.groupby('region').sum()\n",
+        encoding="utf-8",
+    )
+
+    steps, warnings = DiagnosisAgent.__new__(DiagnosisAgent)._sanitize_migration_steps(
+        [
+            MigrationStep(
+                step_id="step_001",
+                file="src/loaders.py",
+                description="Migrate loaders.",
+                allowed_files=["src/loaders.py"],
+            ),
+            MigrationStep(
+                step_id="step_002",
+                file="src/summaries.py",
+                description="Migrate summaries.",
+                allowed_files=["src/summaries.py"],
+            ),
+        ],
+        ["src/loaders.py", "src/summaries.py"],
+        [],
+        {"target_dependency_action": "none"},
+        project_dir,
+        "pandas",
+        {
+            "groups": [
+                {
+                    "group_id": "flow_group_001",
+                    "files": ["src/loaders.py", "src/summaries.py"],
+                    "symbols": ["load_orders", "revenue_by_region"],
+                    "reason": "consumer requires producer type migration first",
+                    "planning_strategy": "grouped_before_consumers",
+                }
+            ]
+        },
+    )
+
+    # Cross-file flow with grouped_before_consumers produces one atomic step
+    # so that tests pass consistently when producer and consumer are migrated together.
+    assert len(steps) == 1
+    assert steps[0]["file"] == "src/loaders.py"
+    assert steps[0]["files"] == ["src/loaders.py", "src/summaries.py"]
+    assert steps[0]["allowed_files"] == ["src/loaders.py", "src/summaries.py"]
+    assert steps[0]["allowed_symbols"] == []
+    assert any("Grouped DataFrame flow files" in warning for warning in warnings)
+
+
+def test_diagnosis_flow_symbol_dependencies_keep_cross_file_consumers_at_file_level(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "loaders.py").write_text(
+        "import pandas as pd\n\n\n"
+        "def paid_orders(path):\n"
+        "    return pd.read_csv(path)\n",
+        encoding="utf-8",
+    )
+    (source_dir / "summaries.py").write_text(
+        "from src.loaders import paid_orders\n\n\n"
+        "def revenue_by_region(path):\n"
+        "    paid = paid_orders(path)\n"
+        "    return paid.groupby('region').sum()\n\n\n"
+        "def monthly_product_matrix(path):\n"
+        "    paid = paid_orders(path)\n"
+        "    return paid.pivot_table(index='region')\n",
+        encoding="utf-8",
+    )
+
+    steps, warnings = DiagnosisAgent.__new__(DiagnosisAgent)._sanitize_migration_steps(
+        [
+            MigrationStep(
+                step_id="step_001",
+                file="src/loaders.py",
+                description="Migrate loaders.",
+                allowed_files=["src/loaders.py"],
+            ),
+            MigrationStep(
+                step_id="step_002",
+                file="src/summaries.py",
+                description="Migrate summaries.",
+                allowed_files=["src/summaries.py"],
+            ),
+        ],
+        ["src/loaders.py", "src/summaries.py"],
+        [],
+        {"target_dependency_action": "none"},
+        project_dir,
+        "pandas",
+        {
+            "symbols": [
+                {
+                    "file": "src/loaders.py",
+                    "symbol": "paid_orders",
+                    "role": "producer",
+                    "returns_dataframe": True,
+                    "consumes_dataframe_from": [],
+                    "type_contract": "pandas.DataFrame",
+                },
+                {
+                    "file": "src/summaries.py",
+                    "symbol": "revenue_by_region",
+                    "role": "consumer",
+                    "returns_dataframe": True,
+                    "consumes_dataframe_from": ["paid_orders"],
+                    "type_contract": "pandas.DataFrame",
+                },
+            ],
+            "groups": [
+                {
+                    "group_id": "flow_group_001",
+                    "files": ["src/loaders.py"],
+                    "symbols": ["paid_orders"],
+                    "reason": "producer file",
+                    "planning_strategy": "file_level_steps",
+                },
+                {
+                    "group_id": "flow_group_002",
+                    "files": ["src/summaries.py"],
+                    "symbols": ["revenue_by_region"],
+                    "reason": "consumer file",
+                    "planning_strategy": "file_level_steps",
+                },
+            ],
+        },
+    )
+
+    assert [step["file"] for step in steps] == ["src/loaders.py", "src/summaries.py"]
+    assert [step["allowed_symbols"] for step in steps] == [[], []]
+    assert any("DataFrame flow analysis marked it as coupled" in warning for warning in warnings)

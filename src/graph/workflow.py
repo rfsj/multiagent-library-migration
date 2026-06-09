@@ -4,6 +4,7 @@ from langgraph.graph import END, StateGraph
 
 from src.agents.diagnosis_agent import DiagnosisAgent
 from src.agents.migration_agent import MigrationAgent
+from src.agents.repair_agent import RepairAgent
 from src.agents.validation_agent import ValidationAgent
 from src.graph.diagnosis_flow import build_diagnosis_node
 from src.graph.migration_flow import (
@@ -21,6 +22,7 @@ def run_simple_workflow(state: WorkflowState) -> WorkflowState:
     snapshots_dir = state.run_dir / "snapshots"
     diagnosis_agent = DiagnosisAgent()
     migration_agent = MigrationAgent()
+    repair_agent = RepairAgent()
     validation_agent = ValidationAgent()
 
     graph = StateGraph(GraphState)
@@ -28,7 +30,7 @@ def run_simple_workflow(state: WorkflowState) -> WorkflowState:
     graph.add_node("select_next_step", select_next_step)
     graph.add_node("snapshot_before_step", build_snapshot_node(snapshots_dir))
     graph.add_node("migrate_step", build_migration_node(migration_agent, logs_dir))
-    graph.add_node("validate_step", build_validation_node(validation_agent, logs_dir))
+    graph.add_node("validate_step", build_validation_node(validation_agent, logs_dir, repair_agent))
     graph.set_entry_point("diagnose")
     graph.add_edge("diagnose", "select_next_step")
     graph.add_conditional_edges(

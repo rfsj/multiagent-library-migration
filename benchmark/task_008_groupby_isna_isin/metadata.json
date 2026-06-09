@@ -1,0 +1,10 @@
+{
+  "task_id": "task_008_groupby_isna_isin",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate groupby/agg, isna/notna null checks, isin membership filtering and boolean mask row selection from pandas to Polars.",
+  "expected_changed_files": [
+    "src/reports/aggregations.py",
+    "requirements.txt"
+  ]
+}

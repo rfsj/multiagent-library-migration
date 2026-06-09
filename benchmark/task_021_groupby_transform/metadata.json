@@ -1,0 +1,10 @@
+{
+  "task_id": "task_021_groupby_transform",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate groupby().transform() with named aggregations ('sum', 'mean') and lambda-based rank to create group-level derived columns while preserving the original DataFrame shape, from pandas to Polars (over() expressions).",
+  "expected_changed_files": [
+    "src/sales/analytics.py",
+    "requirements.txt"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "task_id": "task_004_join_window_pipeline",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a coupled customer retention pipeline with pandas usage across loaders and feature builders: datetime parsing, string normalization, joins, groupby aggregations, drop_duplicates, derived duration columns and pivot_table-based retention matrix.",
+  "expected_changed_files": [
+    "src/retention/loaders.py",
+    "src/retention/features.py",
+    "requirements.txt"
+  ]
+}

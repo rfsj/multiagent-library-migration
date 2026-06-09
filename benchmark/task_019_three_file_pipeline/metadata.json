@@ -1,0 +1,12 @@
+{
+  "task_id": "task_019_three_file_pipeline",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a three-file logistics pipeline: product catalog filtering, order totals computed via join and groupby, and a fulfillment rate calculator using left join with indicator and isin-based anti-join across three interdependent files.",
+  "expected_changed_files": [
+    "src/logistics/products.py",
+    "src/logistics/orders.py",
+    "src/logistics/fulfillment.py",
+    "requirements.txt"
+  ]
+}

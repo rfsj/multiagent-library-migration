@@ -50,6 +50,14 @@ class FakeMigrationAgent:
         }
 
 
+class RepairAwareFakeMigrationAgent(FakeMigrationAgent):
+    retry_feedback_seen = []
+
+    def run_step(self, project_dir: Path, step: dict, logs_dir: Path):
+        self.retry_feedback_seen.append(step.get("retry_feedback"))
+        return super().run_step(project_dir, step, logs_dir)
+
+
 class FakeValidationAgent:
     def validate_step(self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path):
         assert before_dir.exists()
@@ -149,6 +157,78 @@ class RejectFirstStepValidationAgent(FakeValidationAgent):
         )
 
 
+class RepairableRejectValidationAgent(FakeValidationAgent):
+    def validate_step(self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path):
+        return {
+            "agent": "validation_agent",
+            "step_id": step["step_id"],
+            "changed_files": [step["file"]],
+            "out_of_scope_changes": [],
+            "tests": "failed",
+            "pytest_feedback": "TypeError: DataFrame object does not support `Series` assignment by index",
+            "status": "rejected",
+        }
+
+    def evaluate_step(
+        self,
+        planned_step: dict,
+        migration_result: dict,
+        before_snapshot: dict,
+        validation_evidence: dict,
+        logs_dir: Path,
+    ):
+        return {
+            "agent": "validation_agent",
+            "step_id": planned_step["step_id"],
+            "verdict": "rejected_implementation",
+            "rationale": "Step failed fake validation.",
+            "feedback_target": "agent_2",
+            "feedback_for_agent": "raw validation feedback",
+            "retry_recommendation": "retry",
+            "confidence": "high",
+        }
+
+
+class FakeRepairAgent:
+    def __init__(self):
+        self.calls = []
+
+    def build_repair_plan(
+        self,
+        *,
+        project_dir: Path,
+        planned_step: dict,
+        migration_result: dict,
+        validation_evidence: dict,
+        logs_dir: Path,
+        attempt: int,
+    ):
+        self.calls.append(
+            {
+                "step_id": planned_step["step_id"],
+                "attempt": attempt,
+                "pytest_feedback": validation_evidence["pytest_feedback"],
+            }
+        )
+        return {
+            "agent": "repair_agent",
+            "step_id": planned_step["step_id"],
+            "file": planned_step["file"],
+            "attempt": attempt,
+            "failure_category": "unsupported_operation",
+            "root_cause": "Polars column assignment used pandas syntax.",
+            "repair_strategy": "replace_assignment_with_with_columns",
+            "instructions_for_migration_agent": [
+                "Replace df column assignment with with_columns.",
+            ],
+            "acceptance_criteria": [
+                "No migrated Polars DataFrame uses df['col'] assignment.",
+            ],
+            "must_not_do": ["Do not use df['col'] = ... on Polars DataFrames."],
+            "confidence": "high",
+        }
+
+
 def test_workflow_runs_migration_step_through_langgraph(tmp_path, monkeypatch):
     monkeypatch.setattr("src.graph.workflow.DiagnosisAgent", FakeDiagnosisAgent)
     monkeypatch.setattr("src.graph.workflow.MigrationAgent", FakeMigrationAgent)
@@ -223,3 +303,37 @@ def test_workflow_continues_after_step_exhausts_retries(tmp_path, monkeypatch):
     assert "MIGRATION MANUAL REVIEW START step_001" in failed_content
     assert "Step failed fake validation." in failed_content
     assert (source_dir / "two.py").read_text(encoding="utf-8") == "import polars as pl\n"
+
+
+def test_workflow_uses_repair_agent_feedback_for_retry(tmp_path, monkeypatch):
+    fake_repair_agent = FakeRepairAgent()
+    RepairAwareFakeMigrationAgent.retry_feedback_seen = []
+    monkeypatch.setattr("src.graph.workflow.DiagnosisAgent", FakeDiagnosisAgent)
+    monkeypatch.setattr("src.graph.workflow.MigrationAgent", RepairAwareFakeMigrationAgent)
+    monkeypatch.setattr("src.graph.workflow.ValidationAgent", RepairableRejectValidationAgent)
+    monkeypatch.setattr("src.graph.workflow.RepairAgent", lambda: fake_repair_agent)
+
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "example.py").write_text("import pandas as pd\n", encoding="utf-8")
+
+    state = WorkflowState(
+        task_id="task_fake",
+        project_dir=project_dir,
+        run_dir=tmp_path / "run",
+        source_library="pandas",
+        target_library="polars",
+    )
+
+    result = run_simple_workflow(state)
+
+    assert fake_repair_agent.calls
+    assert result.retry_counts == {"step_001": 3}
+    retry_feedback = [feedback for feedback in RepairAwareFakeMigrationAgent.retry_feedback_seen if feedback]
+    assert retry_feedback
+    assert "RepairAgent produced a repair plan" in retry_feedback[0]["feedback_for_agent"]
+    assert "Failure category: unsupported_operation" in retry_feedback[0]["feedback_for_agent"]
+    assert "Acceptance criteria" in retry_feedback[0]["feedback_for_agent"]
+    assert "No migrated Polars DataFrame uses df['col'] assignment." in retry_feedback[0]["feedback_for_agent"]
+    assert result.failed_steps[0]["step_id"] == "step_001"

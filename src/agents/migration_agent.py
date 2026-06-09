@@ -1,26 +1,120 @@
 from __future__ import annotations
 
-import json
 import ast
+import json
 import re
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+
+from src.agents.implementation_review_agent import ImplementationReviewAgent
+from src.llm import get_llm
+from src.tools.ast_transformer import apply_ast_transforms, ast_fallback_enabled
+from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusing_patterns
+
+load_dotenv()
+
+_PROMPTS_DIR = Path(__file__).parents[2] / "prompts"
+MAX_IMPLEMENTATION_REVIEW_REVISIONS = 2
+MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS = 2
+
+_HUMAN_TEMPLATE = """\
+Migrate the following file from {source_library} to {target_library}.
+
+## Planned step
+{description}
+
+## File info
+- File: {file}
+- Allowed symbols to migrate: {allowed_symbols_str}
+
+## Source code
+```python
+{source_code}
+```
+
+## Key Points
+- Complete the migration fully. Every use of {source_library} must be replaced.
+- Use idiomatic {target_library} code (e.g., `.filter()` instead of boolean indexing).
+- Delete lines that don't apply in {target_library} (e.g., `.reset_index(drop=True)` for polars).
+- Ensure the code is syntactically valid for Python 3.9+.
+- Preserve all business logic and behavior.
+
+{pattern_analysis}{retry_feedback_context}
+
+Return ONLY the complete migrated file, preserving all untouched code outside the migration scope.
+"""
+
+
+class UnmigratedPattern(BaseModel):
+    line: int = Field(default=0, description="Line number in the original file.")
+    api_call: str = Field(default="", description="Source-library API call that could not be migrated.")
+    reason: str = Field(default="", description="Why no target-library equivalent exists.")
+
+
+class MigrationResult(BaseModel):
+    migrated_code: str = Field(
+        description="The complete migrated file content, preserving all untouched code."
+    )
+    changes_summary: str = Field(
+        description="Brief summary of the migration changes applied."
+    )
+    migrated_requirements: Optional[str] = Field(
+        default=None,
+        description="Updated requirements.txt content, or null if not changed by this step.",
+    )
+    unmigrated_patterns: list[UnmigratedPattern] = Field(
+        default_factory=list,
+        description="Source-library patterns that could not be migrated and require manual review.",
+    )
 
 
 class MigrationAgent:
-    """Executes one planned migration step at a time."""
+    """LLM-powered agent that executes one planned migration step at a time."""
 
     name = "migration_agent"
 
+    def __init__(self, implementation_review_agent: ImplementationReviewAgent | None = None) -> None:
+        system_prompt = (_PROMPTS_DIR / "migration_agent_v2.md").read_text(encoding="utf-8")
+        llm = get_llm().with_structured_output(MigrationResult)
+        self._chain = (
+            ChatPromptTemplate.from_messages([
+                SystemMessage(content=system_prompt),
+                ("human", _HUMAN_TEMPLATE),
+            ])
+            | llm
+        )
+        self._implementation_review_agent = (
+            implementation_review_agent or ImplementationReviewAgent()
+        )
+        self._current_unmigrated_patterns: list[dict[str, Any]] = []
+
+
     def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
+        self._current_unmigrated_patterns = []
+        if step.get("files"):
+            return self._run_grouped_step(project_dir, step, logs_dir)
+
         rel_file = Path(step["file"])
         self._validate_step_scope(step, rel_file)
         target = project_dir / rel_file
         original = target.read_text(encoding="utf-8")
+
         retry_feedback = step.get("retry_feedback")
-        migrated = self._migrate_file(rel_file, original, step)
+        migrated, total_attempts, last_error = self._migrate_file_with_llm(
+            rel_file,
+            original,
+            step,
+            retry_feedback,
+            logs_dir,
+        )
+
         changed_files: list[str] = []
         if migrated != original:
             target.write_text(migrated, encoding="utf-8")
@@ -39,105 +133,373 @@ class MigrationAgent:
             "changed_files": changed_files,
             "status": "completed" if changed_files else "no_change",
             "retry_feedback_received": bool(retry_feedback),
+            "unmigrated_patterns": self._current_unmigrated_patterns,
+        }
+        if total_attempts:
+            result["structured_output_attempts"] = total_attempts
+        if last_error:
+            result["structured_output_error"] = last_error
+        (logs_dir / f"{step['step_id']}_migration.json").write_text(
+            json.dumps(result, indent=2), encoding="utf-8"
+        )
+        return result
+
+    def _run_grouped_step(
+        self,
+        project_dir: Path,
+        step: dict[str, Any],
+        logs_dir: Path,
+    ) -> dict[str, Any]:
+        # Phase 1: migrate all files without writing to disk yet.
+        # This prevents partial state where A uses Polars but B still uses pandas.
+        pending: list[tuple[Path, str, str, str]] = []  # (path, original, migrated, rel_str)
+        file_results: list[dict[str, Any]] = []
+
+        for rel_file_str in step.get("files", []):
+            file_step = {
+                **step,
+                "file": rel_file_str,
+                "allowed_symbols": [],
+            }
+            rel_file = Path(rel_file_str)
+            self._validate_step_scope(file_step, rel_file)
+            target = project_dir / rel_file
+            original = target.read_text(encoding="utf-8")
+
+            # Scope retry feedback to the current file so the LLM isn't confused
+            # by errors from sibling files (e.g., a pivot-table error in features.py
+            # passed verbatim to loaders.py causes structured-output failure).
+            file_retry_feedback = _scoped_retry_feedback(
+                step.get("retry_feedback"), rel_file_str
+            )
+
+            migrated, file_attempts, file_error = self._migrate_file_with_llm(
+                rel_file,
+                original,
+                file_step,
+                file_retry_feedback,
+                logs_dir,
+            )
+            pending.append((target, original, migrated, rel_file_str))
+            file_results.append(
+                {
+                    "file": str(rel_file),
+                    "changed": migrated != original,
+                    "structured_output_attempts": file_attempts,
+                    "structured_output_error": file_error,
+                }
+            )
+
+        # Phase 2: write atomically — only if every file produced valid LLM output.
+        # A structured_output_error means the LLM gave up; writing the other files
+        # would leave the project in a broken inter-file state.
+        changed_files: list[str] = []
+        has_llm_failure = any(r["structured_output_error"] for r in file_results)
+
+        if not has_llm_failure:
+            for target, _original, migrated, rel_file_str in pending:
+                if migrated != _original:
+                    target.write_text(migrated, encoding="utf-8")
+                    changed_files.append(rel_file_str)
+
+            if "requirements.txt" in step.get("allowed_files", []):
+                if self._migrate_allowed_requirements(project_dir, step):
+                    changed_files.append("requirements.txt")
+
+        if has_llm_failure:
+            status = "llm_failure"
+        elif changed_files:
+            status = "completed"
+        else:
+            status = "no_change"
+
+        result = {
+            "agent": self.name,
+            "step_id": step["step_id"],
+            "file": step["file"],
+            "files": step.get("files", []),
+            "allowed_symbols": [],
+            "changed": bool(changed_files),
+            "changed_files": changed_files,
+            "file_results": file_results,
+            "status": status,
+            "retry_feedback_received": bool(step.get("retry_feedback")),
         }
         (logs_dir / f"{step['step_id']}_migration.json").write_text(
             json.dumps(result, indent=2), encoding="utf-8"
         )
         return result
 
-    def _validate_step_scope(self, step: dict[str, Any], rel_file: Path) -> None:
-        allowed_files = set(step.get("allowed_files", []))
-        if str(rel_file) not in allowed_files:
-            raise ValueError(
-                f"Step {step['step_id']} targets {rel_file}, "
-                "but that file is not listed in allowed_files."
+    def _migrate_file_with_llm(
+        self,
+        rel_file: Path,
+        source: str,
+        step: dict[str, Any],
+        retry_feedback: dict[str, Any] | str | None,
+        logs_dir: Path,
+    ) -> tuple[str, int, str]:
+        if rel_file.name == "requirements.txt":
+            return self._migrate_requirements(source, step), 0, ""
+
+        if rel_file.suffix != ".py":
+            return source, 0, ""
+
+        allowed_symbols = step.get("allowed_symbols", [])
+        migrated, total_attempts, last_error = self._invoke_migration_chain(
+            rel_file, source, step, retry_feedback
+        )
+        if allowed_symbols:
+            migrated = self._apply_allowed_symbol_scope(source, migrated, allowed_symbols)
+
+        migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
+            rel_file, source, step, migrated, allowed_symbols
+        )
+        total_attempts += regen_attempts
+        if regen_error:
+            last_error = regen_error
+
+        migrated, rescan_attempts, rescan_error = self._rescan_and_retry_if_patterns_remain(
+            rel_file, source, step, migrated, allowed_symbols
+        )
+        total_attempts += rescan_attempts
+        if rescan_error:
+            last_error = rescan_error
+
+        if ast_fallback_enabled() and rel_file.suffix == ".py":
+            source_library = step.get("source_library", "pandas")
+            ast_result = apply_ast_transforms(migrated, source_library)
+            migrated = ast_result.code
+
+        revision_index = 0
+        review = self._review_migrated_code(rel_file, source, migrated, step, logs_dir)
+        while (
+            review
+            and review["status"] == "needs_revision"
+            and revision_index < MAX_IMPLEMENTATION_REVIEW_REVISIONS
+        ):
+            revision_index += 1
+            migrated, rev_attempts, rev_error = self._invoke_migration_chain(
+                rel_file,
+                source,
+                step,
+                {"feedback_for_agent": _review_feedback_for_migration(review, migrated)},
+            )
+            total_attempts += rev_attempts
+            if rev_error:
+                last_error = rev_error
+            if allowed_symbols:
+                migrated = self._apply_allowed_symbol_scope(
+                    source, migrated, allowed_symbols
+                )
+            migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
+                rel_file, source, step, migrated, allowed_symbols
+            )
+            total_attempts += regen_attempts
+            if regen_error:
+                last_error = regen_error
+            suffix = (
+                "implementation_review_after_revision"
+                if revision_index == 1
+                else f"implementation_review_after_revision_{revision_index}"
+            )
+            review = self._review_migrated_code(
+                rel_file,
+                source,
+                migrated,
+                step,
+                logs_dir,
+                log_suffix=suffix,
             )
 
-    def _migrate_file(self, rel_file: Path, source: str, step: dict[str, Any]) -> str:
-        if rel_file.name == "requirements.txt":
-            return self._migrate_requirements(source, step)
-        if rel_file.suffix == ".py":
-            return self._migrate_python_source(source, step)
-        return source
+        return migrated, total_attempts, last_error
 
-    def _migrate_allowed_requirements(self, project_dir: Path, step: dict[str, Any]) -> bool:
-        requirements = project_dir / "requirements.txt"
-        if not requirements.exists():
-            return False
-        original = requirements.read_text(encoding="utf-8")
-        migrated = self._migrate_requirements(original, step)
-        if migrated == original:
-            return False
-        requirements.write_text(migrated, encoding="utf-8")
-        return True
-
-    def _migrate_python_source(self, source: str, step: dict[str, Any] | None = None) -> str:
-        allowed_symbols = (step or {}).get("allowed_symbols", [])
+    def _regenerate_if_invalid_python(
+        self,
+        rel_file: Path,
+        source: str,
+        step: dict[str, Any],
+        migrated: str,
+        allowed_symbols: list[str],
+    ) -> tuple[str, int, str]:
+        syntax_error = self._validate_python39_syntax(migrated)
+        if not syntax_error:
+            return migrated, 0, ""
+        regenerated, attempts, error = self._invoke_migration_chain(
+            rel_file,
+            source,
+            step,
+            {
+                "feedback_for_agent": (
+                    "The previous migrated file was not valid Python and "
+                    "must be regenerated as a complete, syntactically valid "
+                    f"file. Syntax feedback: {syntax_error}"
+                )
+            },
+        )
         if allowed_symbols:
-            return self._migrate_python_symbols(source, allowed_symbols)
+            regenerated = self._apply_allowed_symbol_scope(
+                source, regenerated, allowed_symbols
+            )
+        return regenerated, attempts, error
 
-        output = source
-        output = re.sub(r"^import pandas as pd$", "import polars as pl", output, flags=re.MULTILINE)
-        return self._migrate_python_snippet(output)
+    def _invoke_migration_chain(
+        self,
+        rel_file: Path,
+        source: str,
+        step: dict[str, Any],
+        retry_feedback: dict[str, Any] | str | None,
+    ) -> tuple[str, int, str]:
+        allowed_symbols = step.get("allowed_symbols", [])
+        allowed_symbols_str = ", ".join(allowed_symbols) if allowed_symbols else "(all code in file)"
 
-    def _migrate_python_symbols(self, source: str, allowed_symbols: list[str]) -> str:
+        retry_feedback_context = ""
+        if retry_feedback:
+            retry_feedback_context = _retry_feedback_context(retry_feedback)
+
+        source_library = step.get("source_library", "pandas")
+        hits = scan_for_confusing_patterns(source, source_library, allowed_symbols or None)
+        prompt_payload = {
+            "source_library": source_library,
+            "target_library": step.get("target_library", "polars"),
+            "file": str(rel_file),
+            "description": step.get("description", "Migrate this file."),
+            "allowed_symbols_str": allowed_symbols_str,
+            "source_code": source,
+            "pattern_analysis": format_pattern_analysis(hits),
+            "retry_feedback_context": retry_feedback_context,
+        }
+        for attempt in range(1, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS + 1):
+            result: MigrationResult | None = self._chain.invoke(prompt_payload)
+            migrated_code = getattr(result, "migrated_code", None)
+            if isinstance(migrated_code, str):
+                patterns = getattr(result, "unmigrated_patterns", None)
+                if patterns:
+                    self._current_unmigrated_patterns = [
+                        p.model_dump() if hasattr(p, "model_dump") else dict(p)
+                        for p in patterns
+                    ]
+                return migrated_code, attempt, ""
+
+        return source, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS, "MigrationAgent returned no structured output."
+
+    def _review_migrated_code(
+        self,
+        rel_file: Path,
+        original: str,
+        migrated: str,
+        step: dict[str, Any],
+        logs_dir: Path,
+        log_suffix: str = "implementation_review",
+    ) -> dict[str, Any] | None:
+        dataframe_flow_analysis = step.get("dataframe_flow_analysis")
+        if not dataframe_flow_analysis:
+            return None
+        if rel_file.suffix != ".py":
+            return None
+        if migrated == original:
+            return None
+        return self._implementation_review_agent.review(
+            rel_file=rel_file,
+            original_code=original,
+            migrated_code=migrated,
+            planned_step=step,
+            dataframe_flow_analysis=dataframe_flow_analysis,
+            logs_dir=logs_dir,
+            log_suffix=log_suffix,
+        )
+
+    def _apply_allowed_symbol_scope(
+        self,
+        original: str,
+        migrated: str,
+        allowed_symbols: list[str],
+    ) -> str:
         try:
-            tree = ast.parse(source)
+            original_tree = ast.parse(original)
+            migrated_tree = ast.parse(migrated)
         except SyntaxError:
-            return source
+            return original
 
-        lines = source.splitlines(keepends=True)
+        migrated_symbols = {
+            node.name: node
+            for node in migrated_tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and hasattr(node, "end_lineno")
+        }
+        if not migrated_symbols:
+            return original
+
+        original_lines = original.splitlines(keepends=True)
+        migrated_lines = migrated.splitlines(keepends=True)
         replacements: list[tuple[int, int, str]] = []
-        for node in tree.body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for node in original_tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
             if node.name not in allowed_symbols or not hasattr(node, "end_lineno"):
                 continue
-            start = node.lineno - 1
-            end = node.end_lineno
-            migrated = self._migrate_python_snippet("".join(lines[start:end]))
-            replacements.append((start, end, migrated))
+            migrated_node = migrated_symbols.get(node.name)
+            if not migrated_node:
+                continue
+            replacement = "".join(
+                migrated_lines[migrated_node.lineno - 1 : migrated_node.end_lineno]
+            )
+            replacements.append((node.lineno - 1, node.end_lineno, replacement))
 
         if not replacements:
-            return source
+            return original
 
-        for start, end, migrated in reversed(replacements):
-            lines[start:end] = [migrated]
-        output = "".join(lines)
-        if "pl." in output and "import polars as pl" not in output:
-            output = self._ensure_polars_import(output)
-        output = self._remove_unused_pandas_alias_import(output)
-        return output
+        for start, end, replacement in reversed(replacements):
+            original_lines[start:end] = [replacement]
+        scoped = "".join(original_lines)
+        if "pl." in scoped and "import polars as pl" not in scoped:
+            scoped = self._ensure_polars_import(scoped)
+        scoped = self._remove_unused_pandas_alias_import(scoped)
+        return scoped
 
-    def _migrate_python_snippet(self, source: str) -> str:
-        output = source
-        output = output.replace("pd.DataFrame(", "pl.DataFrame(")
-        output = output.replace("pd.Series(", "pl.Series(")
-        output = output.replace("pd.concat(", "pl.concat(")
-        output = output.replace("pd.read_csv(", "pl.read_csv(")
-        output = output.replace("pd.read_json(", "pl.read_json(")
-        output = re.sub(
-            r'(\w+)\s*=\s*\1\[\1\["([^"]+)"\]\s*==\s*"([^"]+)"\]',
-            r'\1 = \1.filter(pl.col("\2") == "\3")',
-            output,
+    def _rescan_and_retry_if_patterns_remain(
+        self,
+        rel_file: Path,
+        source: str,
+        step: dict[str, Any],
+        migrated: str,
+        allowed_symbols: list[str],
+    ) -> tuple[str, int, str]:
+        """Re-scan migrated code and retry once if source-library patterns remain."""
+        if rel_file.suffix != ".py":
+            return migrated, 0, ""
+        source_library = step.get("source_library", "pandas")
+        remaining = scan_for_confusing_patterns(migrated, source_library, allowed_symbols or None)
+        if not remaining:
+            return migrated, 0, ""
+        migrated_lines = migrated.splitlines()
+        pattern_items = []
+        for hit in remaining:
+            line_content = (
+                migrated_lines[hit.line - 1].strip()
+                if 0 < hit.line <= len(migrated_lines)
+                else ""
+            )
+            pattern_items.append(
+                f"- [ ] Line {hit.line}: `{line_content}`\n"
+                f"      Required fix: {hit.guidance}"
+            )
+        feedback = {
+            "feedback_for_agent": (
+                f"Post-migration scan found {len(remaining)} unconverted pattern(s) "
+                "in the migrated code. The lines below still use source-library syntax "
+                "and MUST be rewritten before returning:\n\n"
+                + "\n".join(pattern_items)
+                + "\n\nFor each line above, replace the shown code with the "
+                "target-library equivalent described in 'Required fix'. "
+                "Return the complete corrected file."
+            )
+        }
+        revised, attempts, error = self._invoke_migration_chain(
+            rel_file, source, step, feedback
         )
-        output = re.sub(
-            r"(\w+)\s*=\s*\1\[\1\['([^']+)'\]\s*==\s*'([^']+)'\]",
-            r"\1 = \1.filter(pl.col('\2') == '\3')",
-            output,
-        )
-        output = re.sub(
-            r'(\w+)\[\[([^\]]+)\]\]\.sort_values\(([^)]+)\)',
-            r"\1.select([\2]).sort(\3)",
-            output,
-        )
-        output = output.replace('.to_dict("records")', ".to_dicts()")
-        output = output.replace(".to_dict('records')", ".to_dicts()")
-        output = re.sub(r"\.groupby\(", ".group_by(", output)
-        output = re.sub(r"\.drop_duplicates\(", ".unique(", output)
-        output = re.sub(r"\.sort_values\(", ".sort(", output)
-        output = re.sub(r"\.reset_index\(drop=True\)", "", output)
-        return output
+        if allowed_symbols:
+            revised = self._apply_allowed_symbol_scope(source, revised, allowed_symbols)
+        return revised, attempts, error
 
     def _ensure_polars_import(self, source: str) -> str:
         lines = source.splitlines(keepends=True)
@@ -156,9 +518,78 @@ class MigrationAgent:
         return "".join(lines)
 
     def _remove_unused_pandas_alias_import(self, source: str) -> str:
-        if "pd." in source:
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
             return source
-        return re.sub(r"^import pandas as pd\n+", "", source, flags=re.MULTILINE)
+
+        # Collect every 'import pandas as <alias>' alias name.
+        pandas_aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "pandas" and alias.asname:
+                        pandas_aliases.add(alias.asname)
+
+        if not pandas_aliases:
+            return source
+
+        # An alias is "used" only when it appears as the object of an attribute
+        # access (e.g. pd.DataFrame), not when it merely appears in a comment or
+        # string literal.
+        referenced = {
+            node.value.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in pandas_aliases
+        }
+
+        unused = pandas_aliases - referenced
+        if not unused:
+            return source
+
+        result = source
+        for alias in unused:
+            result = re.sub(
+                rf"^import pandas as {re.escape(alias)}\n+",
+                "",
+                result,
+                flags=re.MULTILINE,
+            )
+        return result
+
+
+
+    def _validate_python39_syntax(self, code: str) -> str | None:
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as e:
+            return f"Syntax error on line {e.lineno}: {e.msg}"
+        return _check_pep604_union_types(tree)
+
+
+
+    def _validate_step_scope(self, step: dict[str, Any], rel_file: Path) -> None:
+        allowed_files = set(step.get("allowed_files", []))
+        if str(rel_file) not in allowed_files:
+            raise ValueError(
+                f"Step {step['step_id']} targets {rel_file}, "
+                "but that file is not listed in allowed_files."
+            )
+
+    def _migrate_allowed_requirements(self, project_dir: Path, step: dict[str, Any]) -> bool:
+        requirements = project_dir / "requirements.txt"
+        if not requirements.exists():
+            return False
+        original = requirements.read_text(encoding="utf-8")
+        migrated = self._migrate_requirements(original, step)
+        if migrated == original:
+            return False
+        requirements.write_text(migrated, encoding="utf-8")
+        return True
+
+
 
     def _migrate_requirements(self, source: str, step: dict[str, Any]) -> str:
         target_library = step.get("target_library")
@@ -167,14 +598,32 @@ class MigrationAgent:
                 f"Step {step['step_id']} targets requirements.txt, "
                 "but no target_library was provided by diagnosis."
             )
-        if self._requirements_contains_package(source, target_library):
-            return source
-        suffix = "" if source.endswith("\n") else "\n"
-        if self._uses_hash_locked_requirements(source):
+        result = self._remove_package_from_requirements(source, step.get("source_library", ""))
+        if self._requirements_contains_package(result, target_library):
+            return result
+        suffix = "" if result.endswith("\n") else "\n"
+        if self._uses_hash_locked_requirements(result):
             dependency = self._resolve_hashed_requirement(target_library)
         else:
             dependency = target_library
-        return source + suffix + dependency + "\n"
+        return result + suffix + dependency + "\n"
+
+    def _remove_package_from_requirements(self, source: str, package_name: str) -> str:
+        if not package_name:
+            return source
+        normalized = _normalize_package_name(package_name)
+        lines = source.splitlines(keepends=True)
+        filtered = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+                filtered.append(line)
+                continue
+            match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", stripped)
+            if match and _normalize_package_name(match.group("name")) == normalized:
+                continue
+            filtered.append(line)
+        return "".join(filtered)
 
     def _requirements_contains_package(self, source: str, package_name: str) -> bool:
         normalized_package = _normalize_package_name(package_name)
@@ -253,6 +702,162 @@ class MigrationAgent:
 
 def _normalize_package_name(name: str) -> str:
     return name.replace("_", "-").lower()
+
+
+def _review_feedback_for_migration(review: dict[str, Any], migrated_code: str) -> str:
+    issues = review.get("issues", [])
+    per_issue_instructions = [
+        f"- [{issue.get('kind', 'issue')}] {issue.get('revision_instruction', '').strip()}"
+        for issue in issues
+        if issue.get("revision_instruction", "").strip()
+    ]
+    top_level = review.get("revision_instructions", "").strip()
+    if per_issue_instructions:
+        instructions_block = "\n".join(per_issue_instructions)
+    elif top_level:
+        instructions_block = top_level
+    else:
+        instructions_block = "Revise the migration to address the listed issues."
+    return (
+        "Implementation review requested a revision before validation.\n\n"
+        f"Issues:\n{json.dumps(issues, indent=2)}\n\n"
+        f"Revision instructions:\n{instructions_block}\n\n"
+        "Previous migrated code:\n"
+        "```python\n"
+        f"{migrated_code}\n"
+        "```"
+    )
+
+
+def _retry_feedback_context(retry_feedback: dict[str, Any] | str) -> str:
+    if not isinstance(retry_feedback, dict):
+        return (
+            "\n## Retry feedback from validation or implementation review\n"
+            f"{retry_feedback}"
+        )
+
+    feedback_text = retry_feedback.get("feedback_for_agent", "No specific feedback.")
+    repair_plan = retry_feedback.get("repair_plan")
+    validation_feedback = retry_feedback.get("validation_feedback")
+    parts = [
+        "## Retry feedback from validation or implementation review",
+        str(feedback_text),
+    ]
+    if repair_plan:
+        parts.extend(
+            [
+                "",
+                "## Structured Repair Plan",
+                "Treat this plan as mandatory for the next migrated file. "
+                "Before returning code, verify every acceptance criterion and "
+                "avoid every forbidden pattern.",
+                json.dumps(repair_plan, indent=2, sort_keys=True),
+            ]
+        )
+        acceptance = repair_plan.get("acceptance_criteria") or []
+        if acceptance:
+            parts.extend(
+                [
+                    "",
+                    "## Mandatory Acceptance Criteria",
+                    *[f"- {item}" for item in acceptance],
+                ]
+            )
+        must_not_do = repair_plan.get("must_not_do") or []
+        if must_not_do:
+            parts.extend(
+                [
+                    "",
+                    "## Forbidden Patterns For This Retry",
+                    *[f"- {item}" for item in must_not_do],
+                ]
+            )
+    if validation_feedback:
+        parts.extend(
+            [
+                "",
+                "## Original Validation Feedback",
+                str(validation_feedback),
+            ]
+        )
+    return "\n" + "\n".join(parts)
+
+
+def _check_pep604_union_types(tree: ast.Module) -> str | None:
+    """Return an error message if the code uses X | Y in annotations without
+    'from __future__ import annotations'.
+
+    In Python 3.9, X | Y is bitwise OR (valid syntax) but causes a TypeError
+    at annotation-evaluation time when X or Y are type objects.  With the
+    __future__ import, annotations are stored as strings and never evaluated,
+    so the expression is safe.  Python 3.10+ natively supports the union type.
+    """
+    for node in tree.body:
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "__future__"
+            and any(alias.name == "annotations" for alias in node.names)
+        ):
+            return None
+
+    annotation_nodes: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AnnAssign):
+            annotation_nodes.append(node.annotation)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.returns is not None:
+                annotation_nodes.append(node.returns)
+            for arg in (
+                node.args.args
+                + node.args.posonlyargs
+                + node.args.kwonlyargs
+                + ([node.args.vararg] if node.args.vararg else [])
+                + ([node.args.kwarg] if node.args.kwarg else [])
+            ):
+                if arg.annotation is not None:
+                    annotation_nodes.append(arg.annotation)
+
+    for annotation in annotation_nodes:
+        for subnode in ast.walk(annotation):
+            if isinstance(subnode, ast.BinOp) and isinstance(subnode.op, ast.BitOr):
+                return (
+                    f"Line {subnode.lineno}: X | Y union syntax in annotations "
+                    "causes a TypeError at runtime on Python 3.9. Add "
+                    "'from __future__ import annotations' at the top of the file "
+                    "or use Union[X, Y] from the typing module instead."
+                )
+    return None
+
+
+def _scoped_retry_feedback(
+    retry_feedback: dict[str, Any] | str | None,
+    rel_file_str: str,
+) -> dict[str, Any] | str | None:
+    """Return retry feedback scoped to a specific file within a grouped step.
+
+    In grouped steps the same validation feedback is reused for all files, but
+    it may describe errors that belong only to a sibling file. Passing irrelevant
+    context (e.g. a pivot-table error) to a simple loader file confuses the LLM
+    and causes structured-output failures. We prefix the feedback with an explicit
+    "you are migrating <file>" anchor so the model stays on-task.
+    """
+    if not retry_feedback:
+        return retry_feedback
+    if isinstance(retry_feedback, dict):
+        original_text = retry_feedback.get("feedback_for_agent", "")
+        return {
+            **retry_feedback,
+            "feedback_for_agent": (
+                f"You are migrating `{rel_file_str}`. "
+                "Focus only on what needs to change in this file.\n\n"
+                + original_text
+            ),
+        }
+    return (
+        f"You are migrating `{rel_file_str}`. "
+        "Focus only on what needs to change in this file.\n\n"
+        + str(retry_feedback)
+    )
 
 
 def _pinned_runtime_dependency(requirement: str) -> tuple[str, str] | None:

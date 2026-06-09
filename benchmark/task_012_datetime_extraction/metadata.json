@@ -1,0 +1,10 @@
+{
+  "task_id": "task_012_datetime_extraction",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate datetime parsing (pd.to_datetime), dt accessor (year, month, day, hour), strftime-based groupby, and hour-range filtering from pandas to Polars.",
+  "expected_changed_files": [
+    "src/events/analysis.py",
+    "requirements.txt"
+  ]
+}

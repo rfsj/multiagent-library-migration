@@ -1,0 +1,10 @@
+{
+  "task_id": "task_011_rename_drop_dropna",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate rename, drop(columns=), and dropna(subset=) column-management operations from pandas to Polars.",
+  "expected_changed_files": [
+    "src/sales/cleaning.py",
+    "requirements.txt"
+  ]
+}

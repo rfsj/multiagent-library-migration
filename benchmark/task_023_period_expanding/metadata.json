@@ -1,0 +1,10 @@
+{
+  "task_id": "task_023_period_expanding",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate dt.to_period('M') and dt.to_period('Q') for period-based groupby, and expanding().mean() / expanding().sum() for cumulative window statistics — neither exists directly in Polars (use strftime and cum_mean/cum_sum).",
+  "expected_changed_files": [
+    "src/metrics/timeseries.py",
+    "requirements.txt"
+  ]
+}

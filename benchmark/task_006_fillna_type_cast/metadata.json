@@ -1,0 +1,10 @@
+{
+  "task_id": "task_006_fillna_type_cast",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate fillna, astype, boolean mask filtering and column selection from pandas to Polars. Single file, three functions covering null handling and type casting.",
+  "expected_changed_files": [
+    "src/inventory/processing.py",
+    "requirements.txt"
+  ]
+}

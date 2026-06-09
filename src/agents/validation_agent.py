@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from dotenv import load_dotenv
+from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -37,6 +38,20 @@ Review the migration step and return a structured verdict.
 """
 
 
+class EvidenceSummary(BaseModel):
+    tests_passed: bool = Field(default=False)
+    out_of_scope_files: list[str] = Field(default_factory=list)
+    imports_remaining: int = Field(default=0)
+    api_calls_remaining: int = Field(default=0)
+    upstream_skipped: bool = Field(default=False)
+
+
+class ActionableFeedback(BaseModel):
+    failure_location: str = Field(default="", description="file:line or empty.")
+    failure_description: str = Field(default="", description="What went wrong.")
+    suggested_correction: str = Field(default="", description="What should change.")
+
+
 class ValidationVerdict(BaseModel):
     step_id: str = Field(description="Step identifier being reviewed.")
     verdict: Literal["accepted", "rejected_implementation", "rejected_plan"] = Field(
@@ -54,6 +69,14 @@ class ValidationVerdict(BaseModel):
     )
     confidence: Literal["high", "medium", "low"] = Field(
         description="Confidence level for the verdict."
+    )
+    evidence_summary: EvidenceSummary = Field(
+        default_factory=EvidenceSummary,
+        description="Structured summary of the deterministic evidence examined.",
+    )
+    actionable_feedback: ActionableFeedback = Field(
+        default_factory=ActionableFeedback,
+        description="Structured breakdown of the concrete problem and expected correction.",
     )
 
 
@@ -78,13 +101,14 @@ class ValidationAgent:
         out_of_scope = [path for path in changed if path not in allowed]
         self._install_dependencies(project_dir, logs_dir / f"{step['step_id']}_install.log")
         tests = run_pytest(project_dir, logs_dir / f"{step['step_id']}_pytest.log")
-        source_usage = self._source_usage_in_step_file(project_dir, step)
+        source_usage = self._source_usage_in_step_files(project_dir, step)
         result = {
             "agent": self.name,
             "step_id": step["step_id"],
             "changed_files": changed,
             "out_of_scope_changes": out_of_scope,
             "tests": tests["status"],
+            "pytest_feedback": _pytest_failure_excerpt(tests),
             "old_imports_remaining": source_usage["old_imports_remaining"],
             "unmigrated_uses": source_usage["unmigrated_uses"],
             "status": "approved"
@@ -141,6 +165,7 @@ class ValidationAgent:
         source_library: str,
         allowed_files: list[str] | None = None,
     ) -> dict[str, Any]:
+        self._install_dependencies(project_dir, logs_dir / "final_install.log")
         scan = scan_project(project_dir, source_library)
         diff = analyze_diff(before_dir, project_dir, allowed_files=allowed_files)
         tests = run_pytest(project_dir, logs_dir / "final_pytest.log")
@@ -185,39 +210,45 @@ class ValidationAgent:
         )
         log_file.write_text(proc.stdout, encoding="utf-8")
 
-    def _source_usage_in_step_file(self, project_dir: Path, step: dict[str, Any]) -> dict[str, int]:
+    def _source_usage_in_step_files(self, project_dir: Path, step: dict[str, Any]) -> dict[str, int]:
         source_library = step.get("source_library")
-        rel_file = Path(step["file"])
-        if not source_library or rel_file.suffix != ".py":
+        rel_files = step.get("files") or [step["file"]]
+        if not source_library:
+            return {"old_imports_remaining": 0, "unmigrated_uses": 0}
+
+        totals = {"old_imports_remaining": 0, "unmigrated_uses": 0}
+        for rel_file in rel_files:
+            usage = self._source_usage_in_one_step_file(
+                project_dir,
+                Path(rel_file),
+                step,
+                source_library,
+            )
+            totals["old_imports_remaining"] += usage["old_imports_remaining"]
+            totals["unmigrated_uses"] += usage["unmigrated_uses"]
+        return totals
+
+    def _source_usage_in_one_step_file(
+        self,
+        project_dir: Path,
+        rel_file: Path,
+        step: dict[str, Any],
+        source_library: str,
+    ) -> dict[str, int]:
+        if rel_file.suffix != ".py":
             return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
         path = project_dir / rel_file
         if not path.exists():
             return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
-        content = path.read_text(encoding="utf-8")
-        allowed_symbols = step.get("allowed_symbols", [])
-        if allowed_symbols:
-            content = _source_for_symbols(content, allowed_symbols)
-            old_imports = content.count(f"import {source_library}") + content.count(
-                f"from {source_library} import"
-            )
-            alias_uses = content.count("pd.") if source_library == "pandas" else 0
-            direct_uses = content.count(f"{source_library}.")
-            return {
-                "old_imports_remaining": old_imports,
-                "unmigrated_uses": alias_uses + direct_uses,
-            }
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:
+            return {"old_imports_remaining": 0, "unmigrated_uses": 0}
 
-        old_imports = content.count(f"import {source_library}") + content.count(
-            f"from {source_library} import"
-        )
-        alias_uses = content.count("pd.") if source_library == "pandas" else 0
-        direct_uses = content.count(f"{source_library}.")
-        return {
-            "old_imports_remaining": old_imports,
-            "unmigrated_uses": alias_uses + direct_uses,
-        }
+        allowed_symbols = step.get("allowed_symbols", [])
+        return _ast_count_source_usage(tree, source_library, allowed_symbols)
 
     def _deterministic_step_verdict(
         self,
@@ -243,6 +274,12 @@ class ValidationAgent:
             }
 
         if validation_evidence.get("status") == "rejected":
+            feedback = {
+                **validation_evidence,
+                "actionable_feedback": _actionable_validation_feedback(
+                    validation_evidence
+                ),
+            }
             return {
                 "agent": self.name,
                 "step_id": step_id,
@@ -252,7 +289,7 @@ class ValidationAgent:
                     "source-library usage did not satisfy the migration contract."
                 ),
                 "feedback_target": "agent_2",
-                "feedback_for_agent": json.dumps(validation_evidence, sort_keys=True),
+                "feedback_for_agent": json.dumps(feedback, sort_keys=True),
                 "retry_recommendation": "retry",
                 "confidence": "high",
             }
@@ -261,11 +298,11 @@ class ValidationAgent:
 
     def _get_chain(self):
         if self._chain is None:
-            system_prompt = (_PROMPTS_DIR / "validation_agent_v1.md").read_text(encoding="utf-8")
+            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(encoding="utf-8")
             llm = get_llm().with_structured_output(ValidationVerdict)
             self._chain = (
                 ChatPromptTemplate.from_messages([
-                    ("system", system_prompt),
+                    SystemMessage(content=system_prompt),
                     ("human", _HUMAN_TEMPLATE),
                 ])
                 | llm
@@ -273,16 +310,180 @@ class ValidationAgent:
         return self._chain
 
 
-def _source_for_symbols(source: str, symbols: list[str]) -> str:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return source
-    lines = source.splitlines(keepends=True)
-    parts = []
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        if node.name in symbols and hasattr(node, "end_lineno"):
-            parts.append("".join(lines[node.lineno - 1:node.end_lineno]))
-    return "\n".join(parts) if parts else source
+def _ast_library_aliases(tree: ast.Module, source_library: str) -> set[str]:
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == source_library or alias.name.startswith(f"{source_library}."):
+                    aliases.add(alias.asname or alias.name.split(".")[0])
+    return aliases
+
+
+def _ast_node_imports_library(node: ast.AST, source_library: str) -> bool:
+    if isinstance(node, ast.Import):
+        return any(
+            alias.name == source_library or alias.name.startswith(f"{source_library}.")
+            for alias in node.names
+        )
+    if isinstance(node, ast.ImportFrom):
+        module = node.module or ""
+        return module == source_library or module.startswith(f"{source_library}.")
+    return False
+
+
+# Well-known short aliases per library used as a fallback: catches references
+# that remain after the import was removed (partial migration produces code
+# like `pd.read_csv(...)` with no `import pandas as pd`).
+_COMMON_LIBRARY_ALIASES: dict[str, set[str]] = {
+    "pandas": {"pd", "pandas"},
+    "polars": {"pl", "polars"},
+}
+
+
+def _ast_count_source_usage(
+    tree: ast.Module,
+    source_library: str,
+    allowed_symbols: list[str],
+) -> dict[str, int]:
+    aliases = _ast_library_aliases(tree, source_library)
+    # Include well-known short aliases even when the import is absent, so a
+    # partially-migrated file that removed the import but left `pd.` calls is
+    # still detected as having unmigrated uses.
+    aliases |= _COMMON_LIBRARY_ALIASES.get(source_library, {source_library})
+
+    if allowed_symbols:
+        symbol_set = set(allowed_symbols)
+        check_nodes: list[ast.AST] = []
+        for node in tree.body:
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name in symbol_set
+            ):
+                check_nodes.extend(ast.walk(node))
+        old_imports = sum(
+            1 for node in check_nodes if _ast_node_imports_library(node, source_library)
+        )
+        unmigrated_uses = sum(
+            1
+            for node in check_nodes
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+        )
+    else:
+        walk = list(ast.walk(tree))
+        old_imports = sum(
+            1 for node in walk if _ast_node_imports_library(node, source_library)
+        )
+        unmigrated_uses = sum(
+            1
+            for node in walk
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in aliases
+        )
+
+    return {"old_imports_remaining": old_imports, "unmigrated_uses": unmigrated_uses}
+
+
+_PYTEST_FAILURE_PATTERNS = frozenset({
+    "AttributeError:",
+    "TypeError:",
+    "ValueError:",
+    "AssertionError:",
+    "ImportError:",
+    "ModuleNotFoundError:",
+    # Polars-specific
+    "ColumnNotFoundError:",
+    "InvalidOperationError:",
+    "SchemaError:",
+    "ComputeError:",
+})
+
+
+def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
+    if tests.get("passed"):
+        return ""
+    log_file = tests.get("log_file")
+    if not log_file:
+        return ""
+    path = Path(log_file)
+    if not path.exists():
+        return ""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    failure_lines = [
+        line
+        for line in lines
+        if (
+            line.startswith("E       ")
+            or "FAILED " in line
+            or any(pattern in line for pattern in _PYTEST_FAILURE_PATTERNS)
+        )
+    ]
+    selected = failure_lines[-max_lines:] if failure_lines else lines[-max_lines:]
+    return "\n".join(selected)
+
+
+def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
+    pytest_feedback = validation_evidence.get("pytest_feedback", "")
+    if not pytest_feedback:
+        return "Review validation evidence and revise the implementation."
+    hints = []
+    has_assertion_index_diff = "At index" in pytest_feedback and " diff" in pytest_feedback
+    has_list_like_diff = "[" in pytest_feedback and "]" in pytest_feedback
+    if "does not support `Series` assignment by index" in pytest_feedback:
+        hints.append(
+            "The migrated code is assigning columns with pandas syntax on a "
+            "Polars DataFrame. Replace df[\"col\"] = ... with df = "
+            "df.with_columns(...alias(\"col\"))."
+        )
+    if "object has no attribute 'sort'" in pytest_feedback or "object has no attribute 'with_columns'" in pytest_feedback or "object has no attribute 'group_by'" in pytest_feedback:
+        hints.append(
+            "The migrated code is using Polars APIs on an object that is still a "
+            "pandas DataFrame. Preserve producer/consumer type compatibility or "
+            "migrate the upstream producer first."
+        )
+    if "ColumnNotFoundError" in pytest_feedback:
+        hints.append(
+            "A Polars expression referenced a missing column. If a new column is "
+            "created and then used by another new column, split the expressions "
+            "into sequential with_columns calls."
+        )
+    if "reset_index" in pytest_feedback:
+        hints.append(
+            "The migrated code is still using pandas reset_index on a Polars "
+            "DataFrame. Remove reset_index(drop=True); Polars has no pandas-style "
+            "row index in the DataFrame contract."
+        )
+    if "unexpected keyword argument 'ascending'" in pytest_feedback:
+        hints.append(
+            "The migrated code passed pandas ascending= to Polars sort. Polars "
+            "uses descending= with inverted booleans, for example pandas "
+            "ascending=[False, False, True] becomes descending=[True, True, False]."
+        )
+    if has_assertion_index_diff:
+        hints.append(
+            "The migrated code has a semantic mismatch in row order or selected "
+            "rows. Compare each original pandas sort_values(..., ascending=...) "
+            "with the Polars sort(..., descending=...) equivalent, preserve null "
+            "ordering, and when pandas sorted before drop_duplicates(..., "
+            "keep='first'), use unique(..., keep='first', maintain_order=True)."
+        )
+    if "columns" in pytest_feedback or (has_assertion_index_diff and has_list_like_diff):
+        hints.append(
+            "The migrated output may have a column-order mismatch. If this comes "
+            "from a pivot/table reshape, preserve the original index columns and "
+            "explicitly select pivoted value columns in the expected deterministic "
+            "order before returning."
+        )
+    if ": None" in pytest_feedback or ": null" in pytest_feedback or "None}" in pytest_feedback:
+        hints.append(
+            "The migrated output includes a null grouping/index value. If the "
+            "original pandas operation dropped null groups, filter null values "
+            "from the relevant grouping or pivot index column before the Polars "
+            "operation."
+        )
+    if not hints:
+        hints.append("Use the pytest failure excerpt to revise the implementation.")
+    return " ".join(hints)

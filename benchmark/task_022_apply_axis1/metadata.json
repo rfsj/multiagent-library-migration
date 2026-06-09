@@ -1,0 +1,10 @@
+{
+  "task_id": "task_022_apply_axis1",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate DataFrame.apply(func, axis=1) for row-wise operations: lambda summing multiple columns, named function with multi-column conditional logic, and lambda with guard clause — from pandas to Polars (with_columns + when/then/otherwise or map_rows).",
+  "expected_changed_files": [
+    "src/hr/calculations.py",
+    "requirements.txt"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "task_id": "task_005_time_series_resampling",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate a time-series finance pipeline with pandas usage across modules: datetime parsing, deduplication, per-symbol resampling, forward fill, pct_change, rolling calculations and merge_asof signal alignment.",
+  "expected_changed_files": [
+    "src/finance/prices.py",
+    "src/finance/signals.py",
+    "requirements.txt"
+  ]
+}

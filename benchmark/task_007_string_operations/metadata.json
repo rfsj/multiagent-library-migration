@@ -1,0 +1,10 @@
+{
+  "task_id": "task_007_string_operations",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate string operations (str.contains, str.startswith, str.strip, str.lower, str.upper) combined with boolean mask filtering from pandas to Polars.",
+  "expected_changed_files": [
+    "src/catalog/search.py",
+    "requirements.txt"
+  ]
+}

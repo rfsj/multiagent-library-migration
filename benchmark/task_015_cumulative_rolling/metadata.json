@@ -1,0 +1,10 @@
+{
+  "task_id": "task_015_cumulative_rolling",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate groupby cumsum, rolling window mean, and pct_change with fillna from pandas to Polars.",
+  "expected_changed_files": [
+    "src/finance/metrics.py",
+    "requirements.txt"
+  ]
+}

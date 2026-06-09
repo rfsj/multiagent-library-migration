@@ -1,0 +1,11 @@
+{
+  "task_id": "task_016_merge_multi_type",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "description": "Migrate inner join, left join with groupby aggregation, and anti-join pattern (left join + indicator + filter) across two source files from pandas to Polars.",
+  "expected_changed_files": [
+    "src/billing/customers.py",
+    "src/billing/invoices.py",
+    "requirements.txt"
+  ]
+}

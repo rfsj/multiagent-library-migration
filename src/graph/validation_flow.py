@@ -31,7 +31,25 @@ class ValidationRunner(Protocol):
         ...
 
 
-def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
+class RepairRunner(Protocol):
+    def build_repair_plan(
+        self,
+        *,
+        project_dir: Path,
+        planned_step: dict[str, Any],
+        migration_result: dict[str, Any],
+        validation_evidence: dict[str, Any],
+        logs_dir: Path,
+        attempt: int,
+    ) -> dict[str, Any]:
+        ...
+
+
+def build_validation_node(
+    validation_agent: ValidationRunner,
+    logs_dir: Path,
+    repair_agent: RepairRunner | None = None,
+):
     def validate_step(graph_state: GraphState) -> dict[str, Any]:
         step = require_current_step(graph_state)
         snapshot_dir = graph_state["current_snapshot_dir"]
@@ -111,7 +129,12 @@ def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
 
         retry_counts = dict(graph_state["retry_counts"])
         retry_counts[step_id] = retry_counts.get(step_id, 0) + 1
-        if retry_counts[step_id] >= MAX_STEP_RETRIES or verdict["retry_recommendation"] == "stop":
+        upstream_failed = step.get("upstream_failed_files", [])
+        if (
+            retry_counts[step_id] >= MAX_STEP_RETRIES
+            or verdict["retry_recommendation"] == "stop"
+            or upstream_failed
+        ):
             _restore_project_dir(snapshot_dir, graph_state["project_dir"])
             marked_files = _mark_manual_review_required(
                 graph_state["project_dir"],
@@ -119,6 +142,13 @@ def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
                 verdict,
                 retry_counts[step_id],
             )
+            rationale = verdict["rationale"]
+            if upstream_failed:
+                rationale = (
+                    f"Upstream producer file(s) {upstream_failed} failed to migrate "
+                    "and still return source-library DataFrames; this step cannot "
+                    "succeed until its dependencies are migrated. " + rationale
+                )
             updates["retry_counts"] = retry_counts
             updates["failed_steps"] = [
                 *graph_state["failed_steps"],
@@ -128,7 +158,7 @@ def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
                     "manual_review_files": marked_files,
                     "verdict": verdict["verdict"],
                     "attempts": retry_counts[step_id],
-                    "rationale": verdict["rationale"],
+                    "rationale": rationale,
                     "feedback_for_agent": verdict["feedback_for_agent"],
                 },
             ]
@@ -142,7 +172,16 @@ def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
             return updates
 
         retry_step = dict(step)
-        retry_step["retry_feedback"] = verdict["feedback_for_agent"]
+        retry_step["retry_feedback"] = _build_retry_feedback(
+            repair_agent=repair_agent,
+            project_dir=graph_state["project_dir"],
+            step=step,
+            migration=migration,
+            validation=validation,
+            verdict=verdict,
+            logs_dir=logs_dir,
+            attempt=retry_counts[step_id],
+        )
         _restore_project_dir(snapshot_dir, graph_state["project_dir"])
         updates.update({
             "retry_counts": retry_counts,
@@ -155,6 +194,67 @@ def build_validation_node(validation_agent: ValidationRunner, logs_dir: Path):
         return updates
 
     return validate_step
+
+
+def _build_retry_feedback(
+    *,
+    repair_agent: RepairRunner | None,
+    project_dir: Path,
+    step: dict[str, Any],
+    migration: dict[str, Any],
+    validation: dict[str, Any],
+    verdict: dict[str, Any],
+    logs_dir: Path,
+    attempt: int,
+) -> dict[str, Any] | str:
+    if repair_agent is None or not _has_repairable_validation_feedback(validation):
+        return verdict["feedback_for_agent"]
+
+    repair_plan = repair_agent.build_repair_plan(
+        project_dir=project_dir,
+        planned_step=step,
+        migration_result=migration,
+        validation_evidence=validation,
+        logs_dir=logs_dir,
+        attempt=attempt,
+    )
+    return {
+        "feedback_for_agent": _repair_plan_feedback(repair_plan, verdict),
+        "repair_plan": repair_plan,
+        "validation_feedback": verdict["feedback_for_agent"],
+    }
+
+
+def _has_repairable_validation_feedback(validation: dict[str, Any]) -> bool:
+    return bool(
+        validation.get("pytest_feedback")
+        or validation.get("actionable_feedback")
+        or validation.get("tests") == "failed"
+    )
+
+
+def _repair_plan_feedback(repair_plan: dict[str, Any], verdict: dict[str, Any]) -> str:
+    return (
+        "RepairAgent produced a repair plan for this retry. Follow every "
+        "instruction and every acceptance criterion instead of repeating the "
+        "previous migration. Treat the forbidden patterns as hard constraints.\n\n"
+        f"Failure category: {repair_plan.get('failure_category', 'unknown')}\n"
+        f"Root cause: {repair_plan.get('root_cause', '')}\n"
+        f"Repair strategy: {repair_plan.get('repair_strategy', '')}\n\n"
+        "Instructions:\n"
+        + "\n".join(
+            f"- {instruction}"
+            for instruction in repair_plan.get("instructions_for_migration_agent", [])
+        )
+        + "\n\nAcceptance criteria:\n"
+        + "\n".join(
+            f"- {item}" for item in repair_plan.get("acceptance_criteria", [])
+        )
+        + "\n\nMust not do:\n"
+        + "\n".join(f"- {item}" for item in repair_plan.get("must_not_do", []))
+        + "\n\nOriginal validation feedback:\n"
+        + str(verdict.get("feedback_for_agent", ""))
+    )
 
 
 def route_after_validation(
