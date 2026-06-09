@@ -71,7 +71,10 @@ Before writing any output, mentally execute this checklist:
    producers return the target-library type before consumers use it.
 3. **Scan for traps** in `source_code`: dependent column creation, mixed sort
    directions, nullable sort columns, pivot tables with numeric `columns=` argument,
-   `drop_duplicates` after sort, `resample`, `merge_asof`, `fillna(method=)`.
+   `drop_duplicates` after sort, `resample`, `merge_asof`, `fillna(method=)`,
+   `groupby().transform()`, `apply(func, axis=1)`, `expanding()`, `dt.to_period()`,
+   `pd.concat(..., axis=1)`, `Series.where(cond, other)`, `pd.cut()`, `.loc[...]`,
+   `merge(..., indicator=True)`, `merge(..., how="outer")`.
 4. **Plan API replacements** for every source-library call in scope.
 5. **Flag any unmigratable pattern**: if a source-library call has no target-library
    equivalent (e.g., `pd.eval()`, MultiIndex, `pivot_table` with integer column names
@@ -91,6 +94,17 @@ Before writing any output, mentally execute this checklist:
 - `.astype(float)` → `.cast(pl.Float64)`
 - `.astype(int)` → `.cast(pl.Int64)`
 
+### Datetime Period Extraction
+- `dt.to_period("M").astype(str)` → `dt.strftime("%Y-%m")`
+- `dt.to_period("Q").astype(str)` → `dt.strftime("%Y") + "Q" + ((dt.month() - 1) / 3 + 1).cast(pl.Int32).cast(pl.Utf8)` — or compute month and derive quarter manually
+- `dt.year` → `dt.year()`
+- `dt.month` → `dt.month()`
+- `dt.day` → `dt.day()`
+- `dt.hour` → `dt.hour()`
+- `dt.dayofweek` → `dt.weekday() - 1` (**pandas is 0=Monday, polars is 1=Monday**)
+
+> ⚠ `dt.to_period()` does **not** exist in Polars. Always replace with `dt.strftime()`.
+
 ### Missing Values
 - `.fillna(value)` → `.fill_null(value)`
 - `.isna()` → `.is_null()`
@@ -101,6 +115,29 @@ Before writing any output, mentally execute this checklist:
 - `df[df["col"] == value]` → `df.filter(pl.col("col") == value)`
 - `df[["col1", "col2"]]` → `df.select(["col1", "col2"])`
 - `df.loc[row_idx, col_idx]` → `df[row_idx, col_idx]`
+- `df.loc[df["col"] > x]` → `df.filter(pl.col("col") > x)`
+- `df.loc[:, ["a", "b"]]` → `df.select(["a", "b"])`
+- `df.iloc[n]` → `df.row(n)` (returns a tuple) or `df[n]` (returns a one-row DataFrame)
+- `df.loc["key"]` on a string-indexed DataFrame → **no direct equivalent**; restructure to filter by a regular column: `df.filter(pl.col("<index_col>") == "key")`
+
+> ⚠ Polars has **no row index**. `.loc` and `.iloc` do not exist. Code that uses a DataFrame as a dict-like lookup (`df.loc["gamma"]`) must be restructured to use a regular column.
+
+### Conditional Column Creation & Value Replacement
+- `np.where(cond, a, b)` → `pl.when(cond).then(a).otherwise(b)`
+- `Series.where(cond, other)` — **semantics are inverted from `filter`**: pandas *keeps* where `True`, *replaces* where `False`:
+  ```python
+  # BEFORE — clamp values
+  df["col"] = df["col"].where(df["col"] >= low, low)
+  df["col"] = df["col"].where(df["col"] <= high, high)
+  # AFTER
+  df = df.with_columns(
+      pl.when(pl.col("col") >= low).then(pl.col("col")).otherwise(low).alias("col")
+  )
+  df = df.with_columns(
+      pl.when(pl.col("col") <= high).then(pl.col("col")).otherwise(high).alias("col")
+  )
+  ```
+- `df.assign(new=lambda x: ...)` → `df.with_columns(expr.alias("new"))`
 
 ### Sorting & Indexing
 - `.sort_values(by, ascending=X)` → `.sort(by, descending=not_X)`
@@ -121,6 +158,33 @@ Before writing any output, mentally execute this checklist:
 - Named aggregation `output_unique=("<id_col>", "nunique")` →
   `pl.col("<id_col>").n_unique().alias("output_unique")`
 - Do not use deprecated `pl.count()` for `nunique`; use `pl.col("col").n_unique()`.
+
+### groupby().transform() — Window Functions with `over()`
+`groupby().transform()` adds a group-level aggregate back to every row of the original DataFrame. In Polars, use `over()`:
+
+```python
+# BEFORE
+df["group_total"] = df.groupby("category")["value"].transform("sum")
+df["group_mean"]  = df.groupby("category")["value"].transform("mean")
+df["rank"]        = df.groupby("category")["value"].transform(
+    lambda x: x.rank(ascending=False, method="dense")
+)
+
+# AFTER
+df = df.with_columns(
+    pl.col("value").sum().over("category").alias("group_total"),
+    pl.col("value").mean().over("category").alias("group_mean"),
+    pl.col("value").rank(method="dense", descending=True).over("category").alias("rank"),
+)
+```
+
+Supported `transform` aggregations via `over()`:
+- `"sum"` → `.sum().over()`
+- `"mean"` → `.mean().over()`
+- `"std"` → `.std().over()`
+- `"min"` / `"max"` → `.min().over()` / `.max().over()`
+- `"cumsum"` / `"cumcount"` → `.cum_sum().over()` / `.cum_count().over()`
+- `lambda x: x.rank(...)` → `.rank(method=..., descending=...).over()`
 
 ### Pivot Tables (Polars 1.17.x)
 - `pd.pivot_table(df, values=V, index=I, columns=C, aggfunc="sum", fill_value=X)` →
@@ -240,6 +304,15 @@ aligned = prices.join_asof(
 - `.fillna(method="bfill")` → `.backward_fill()`
 - Inside a group context: `pl.col("x").forward_fill().over("group_col")`
 
+### Cumulative & Expanding Windows
+- `df["col"].cumsum()` → `pl.col("col").cum_sum()`
+- `groupby("g")["col"].cumsum()` → `pl.col("col").cum_sum().over("g")`
+- `expanding().sum()` → `pl.col("col").cum_sum()`
+- `expanding().mean()` → `pl.col("col").cum_mean()`
+- `expanding().std()` → `pl.col("col").cum_std()`
+
+> ⚠ `expanding()` does **not** exist in Polars. Replace with the corresponding `cum_*` expression. `min_periods` is always 1 for cumulative functions.
+
 ### Percent Change
 - `df["col"].pct_change()` → `pl.col("col").pct_change()`
 - Per-group: `pl.col("col").pct_change().over("group_col").fill_null(0.0)`
@@ -264,12 +337,102 @@ aligned = prices.join_asof(
 - `.str.upper()` → `.str.to_uppercase()`
 - `.str.contains(pattern)` → `.str.contains(pattern)`
 
+### apply(func, axis=1) — Row-wise Operations
+`df.apply(func, axis=1)` iterates over rows. In Polars, restructure as column-wise expressions using `with_columns` + `when/then/otherwise`. Only use `map_rows` as a last resort (slow, loses schema).
+
+```python
+# BEFORE — lambda summing multiple columns
+df["total"] = df.apply(lambda row: row["a"] + row["b"] + row["c"], axis=1)
+# AFTER
+df = df.with_columns((pl.col("a") + pl.col("b") + pl.col("c")).alias("total"))
+
+# BEFORE — conditional logic across columns
+df["risk"] = df.apply(lambda row: "high" if row["x"] > 10 else "low", axis=1)
+# AFTER
+df = df.with_columns(
+    pl.when(pl.col("x") > 10).then(pl.lit("high")).otherwise(pl.lit("low")).alias("risk")
+)
+
+# BEFORE — guard clause (zero-division)
+df["rate"] = df.apply(
+    lambda row: row["a"] / row["b"] if row["b"] > 0 else 0.0, axis=1
+)
+# AFTER
+df = df.with_columns(
+    pl.when(pl.col("b") > 0)
+    .then(pl.col("a") / pl.col("b"))
+    .otherwise(0.0)
+    .alias("rate")
+)
+```
+
+For named functions passed to `apply`: decompose the logic into `when/then/otherwise` chains. If the function body references more than 3 columns with complex branching, use `map_rows` and specify `return_dtype` explicitly.
+
+### pd.cut — Binning
+```python
+# BEFORE
+df["tier"] = pd.cut(df["price"], bins=[0, 25, 75, float("inf")],
+                    labels=["budget", "mid", "premium"]).astype(str)
+# AFTER
+df = df.with_columns(
+    pl.col("price").cut(
+        breaks=[25, 75],
+        labels=["budget", "mid", "premium"],
+    ).alias("tier")
+)
+```
+> `pd.cut` is a module-level function; `pl.cut` is a **column expression method** called as `pl.col("x").cut(breaks=..., labels=...)`. The `breaks` list excludes the first and last edges (Polars infers `(-inf, first_break]` and `(last_break, +inf)`).
+
+### Joins & Anti-joins
+```python
+# BEFORE — inner / left / outer join
+result = left.merge(right, on="key", how="inner")   # → left.join(right, on="key", how="inner")
+result = left.merge(right, on="key", how="left")    # → left.join(right, on="key", how="left")
+result = left.merge(right, on="key", how="outer")   # → left.join(right, on="key", how="full", coalesce=True)
+
+# BEFORE — anti-join via indicator
+merged = left.merge(right[["key"]].drop_duplicates(), on="key", how="left", indicator=True)
+result = merged[merged["_merge"] == "left_only"][["key", "name"]]
+# AFTER — use how="anti" directly
+result = left.join(right.select("key").unique(), on="key", how="anti")
+```
+
+> ⚠ `indicator=True` does **not** exist in Polars. Never attempt to access `_merge` column — it will not be created. Always replace the indicator+filter pattern with `join(..., how="anti")`.
+
+> ⚠ Outer join key: `merge(..., how="outer")` in pandas fills the key column from either side. Polars `join(..., how="full")` fills from the **left** side only — right-only rows get `null`. Add `coalesce=True` to match pandas semantics.
+
+### Concat
+- `pd.concat([df1, df2])` → `pl.concat([df1, df2])`
+- `pd.concat([df1, df2], axis=0, ignore_index=True)` → `pl.concat([df1, df2], how="vertical")`
+- `pd.concat([df1, df2], axis=1)` → `pl.concat([df1, df2], how="horizontal")`
+
+> ⚠ `pd.concat(..., axis=1)` does **not** accept `axis=` in Polars. Use `how="horizontal"`. Both DataFrames must have the same number of rows.
+
+### Sort with key= or Categorical Order
+```python
+# BEFORE — sort with key function
+df.sort_values("col", key=lambda s: s.str.lower())
+# AFTER
+df.sort(pl.col("col").str.to_lowercase())
+
+# BEFORE — sort by categorical order
+df["tier"] = pd.Categorical(df["tier"], categories=["low","mid","high"], ordered=True)
+df.sort_values("tier")
+# AFTER — explicit numeric mapping
+order = {"low": 0, "mid": 1, "high": 2}
+df = (
+    df.with_columns(pl.col("tier").replace(order).alias("_sort_key"))
+    .sort("_sort_key")
+    .drop("_sort_key")
+)
+```
+
 ### Other
 - `.to_dict("records")` → `.to_dicts()`
 - `.copy()` → not needed; Polars operations return new DataFrames
-- `pd.concat([df1, df2])` → `pl.concat([df1, df2])`
-- `.apply(func)` → use `pl.col("col").map_elements(func, return_dtype=pl.Utf8)`
-  or restructure with native Polars expressions when possible
+- `.apply(func)` on a Series → `pl.col("col").map_elements(func, return_dtype=pl.Utf8)`
+- `df.melt(id_vars=..., value_vars=..., var_name=..., value_name=...)` →
+  `df.unpivot(on=value_vars, index=id_vars, variable_name=var_name, value_name=value_name)`
 
 ## Migration Templates
 
@@ -389,6 +552,40 @@ value_cols = sorted([c for c in matrix.columns if c not in index_cols])
 matrix = matrix.select([*index_cols, *value_cols])
 ```
 
+### groupby().transform() → over() Template
+```python
+# BEFORE
+df["region_share"] = df["revenue"] / df.groupby("region")["revenue"].transform("sum")
+df["cat_mean"]     = df.groupby("category")["price"].transform("mean")
+df["deviation"]    = df["price"] - df["cat_mean"]
+
+# AFTER — all window expressions in one with_columns call
+df = df.with_columns(
+    (pl.col("revenue") / pl.col("revenue").sum().over("region")).alias("region_share"),
+    pl.col("price").mean().over("category").alias("cat_mean"),
+)
+df = df.with_columns(
+    (pl.col("price") - pl.col("cat_mean")).alias("deviation")
+)
+```
+
+### Anti-join Template
+```python
+# BEFORE
+merged = customers.merge(
+    invoices[["customer_id"]].drop_duplicates(),
+    on="customer_id", how="left", indicator=True,
+)
+result = merged[merged["_merge"] == "left_only"][["customer_id", "name"]]
+
+# AFTER
+result = customers.join(
+    invoices.select("customer_id").unique(),
+    on="customer_id",
+    how="anti",
+).select(["customer_id", "name"])
+```
+
 ## Self-Check Before Returning Output
 
 Before finalizing your response, verify:
@@ -406,6 +603,15 @@ Before finalizing your response, verify:
    `from __future__ import annotations`).
 9. If `requirements.txt` is in `allowed_files` and the target library was not
    previously listed there, add it.
+10. No `.loc[...]` or `.iloc[...]` — replaced with `filter()`, `select()`, or direct `df[row, col]`.
+11. No `groupby().transform()` — replaced with `.over()` expressions.
+12. No `apply(func, axis=1)` — replaced with `with_columns` + `when/then/otherwise`.
+13. No `expanding()` — replaced with `cum_sum()`, `cum_mean()`, `cum_std()`.
+14. No `dt.to_period()` — replaced with `dt.strftime()`.
+15. No `pd.concat(..., axis=1)` — replaced with `pl.concat(..., how="horizontal")`.
+16. No `merge(..., indicator=True)` filter — replaced with `join(..., how="anti")`.
+17. No `Series.where(cond, other)` — replaced with `pl.when(cond).then(...).otherwise(other)`.
+18. No `pd.cut(col, ...)` — replaced with `pl.col(...).cut(breaks=..., labels=...)`.
 
 ## Output Format
 
