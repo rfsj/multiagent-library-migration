@@ -18,20 +18,24 @@ O transformer atual cobre `df["col"] = rhs`, `.reset_index()` e `.sort_values()`
 
 ---
 
-### 2. Corrigir llm_model no report.json
+### ~~2. Corrigir llm_model no report.json~~ ✅ IMPLEMENTADO
 
-`environment.llm_model` sempre mostra `"rule-based-mvp"` — hardcoded em `src/evaluation/report_generator.py:26`. A variável `LLM_MODEL_NAME` já existe no `.env` mas não é lida.
+~~`environment.llm_model` sempre mostra `"rule-based-mvp"` — hardcoded em `src/evaluation/report_generator.py:26`.~~
 
-**Fix**: Ler `os.environ.get("LLM_MODEL_NAME", "unknown")` em `environment_versions()`.
-
-**Arquivo**: `src/evaluation/report_generator.py`
+**Implementado**: `environment_versions()` agora lê `os.environ.get("LLM_MODEL", "unknown")` e aparece corretamente no `report.json`.
 
 ---
 
-### 3. Rodar e Validar task_002, task_004 e task_005
+### 3. Rodar e Validar tasks sintéticas 019–026
 
+- Tasks 019–026 foram criadas mas nunca validadas com execução real. Cobrem padrões mais complexos do que as tasks 001–018:
+  - `task_019_three_file_pipeline`, `task_020_full_analytics_pipeline` — pipelines multi-arquivo
+  - `task_021_groupby_transform` — `groupby().transform()`
+  - `task_022_apply_axis1` — `apply(axis=1)`
+  - `task_023_period_expanding` — `dt.to_period()`, `expanding()`
+  - `task_024_concat_where` — `pd.concat`, `Series.where`
+  - `task_025_transform_apply_pipeline`, `task_026_hurst` — padrões avançados
 - `task_002_complex_pandas_ops`: Trava com `gemini-2.5-pro` (timeout silencioso) e falha com `flash-lite` sem AST. Potencialmente resolve com `gemini-3.1-flash-lite` + `MIGRATION_AST_FALLBACK=1`.
-- `task_004_pyjanitor` e `task_005_ydata_profiling`: Importadas mas nunca executadas. São o teste mais importante de generalização do framework para projetos reais.
 
 ---
 

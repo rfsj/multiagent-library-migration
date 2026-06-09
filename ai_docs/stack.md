@@ -60,20 +60,32 @@ O provider é configurado via `LLM_PROVIDER` e `LLM_MODEL` no `.env`:
     ↓
 scripts/run_task.py
     ↓
-WorkflowState + LangGraph StateGraph
+WorkflowState + LangGraph StateGraph (src/graph/workflow.py)
     ↓
-┌─────────────────────────────────────────┐
-│          WORKFLOW NODES                 │
-│                                         │
-│  DiagnosisAgent ──→ LLM (diagnosis_v1) │
-│       ↓                                 │
-│  MigrationAgent ──→ LLM (migration_v1)  │
-│       ↓  ↑ retry                        │
-│  ValidationAgent ──→ LLM (validation_v1)│
-│       ↓  ↑ repair                       │
-│  RepairAgent ──→ LLM (repair_v1)       │
-│  ImplementationReviewAgent              │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│          WORKFLOW NODES (StateGraph)                    │
+│                                                         │
+│  diagnose        ← build_diagnosis_node()               │
+│      DiagnosisAgent: pass 1 (DataFrameFlowAnalysis)     │
+│                    + pass 2 (DiagnosisPlan)             │
+│       ↓                                                 │
+│  select_next_step ← select_next_step()                  │
+│       ↓                                                 │
+│  snapshot_before_step ← build_snapshot_node()           │
+│       ↓                                                 │
+│  migrate_step    ← build_migration_node()               │
+│      MigrationAgent: LLM + rescan + AST fallback        │
+│                    + ImplementationReviewAgent           │
+│       ↓                                                 │
+│  validate_step   ← build_validation_node()              │
+│      ValidationAgent: pytest + diff + scan              │
+│      RepairAgent (em retry): categoriza falha           │
+│       ↓ (rota condicional)                              │
+│  → select_next_step (accepted)                          │
+│  → snapshot_before_step (retry)                         │
+│  → diagnose (replan)                                    │
+│  → __end__ (stop)                                       │
+└─────────────────────────────────────────────────────────┘
     ↓
 ValidationAgent.final_validate()
     ↓
@@ -89,13 +101,16 @@ experiments/runs/<task_id>_<timestamp>/
 │   ├── before_migration/       # Snapshot inicial (referência)
 │   └── before_step_NNN/        # Snapshot antes de cada step
 ├── logs/
+│   ├── project_audit.json
 │   ├── diagnosis_plan.json
 │   ├── dataframe_flow_analysis.json
 │   ├── step_NNN_migration.json
 │   ├── step_NNN_validation.json
 │   ├── step_NNN_verdict.json
 │   ├── step_NNN_repair_NN.json
-│   └── final_validation.json
+│   ├── step_NNN_implementation_review.json
+│   ├── final_validation.json
+│   └── llm_proxy.jsonl         # TODAS as chamadas ao LLM (request + response)
 ├── prompts/                    # Cópia dos prompts usados (auditoria)
 ├── diff.patch
 └── report.json

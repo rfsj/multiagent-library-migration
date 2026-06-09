@@ -36,7 +36,7 @@ graph.add_conditional_edges("validate_step", route_after_validation, {
 
 ## Padrão de Structured Output
 
-Todos os outputs LLM usam `llm.with_structured_output(PydanticModel)`:
+A maioria dos agentes usa `llm.with_structured_output(PydanticModel)`:
 
 ```python
 class MigrationResult(BaseModel):
@@ -47,7 +47,21 @@ llm = get_llm().with_structured_output(MigrationResult)
 result: MigrationResult = chain.invoke(payload)
 ```
 
-Isso garante que respostas malformadas são rejeitadas e retryadas antes de chegar ao código de aplicação.
+**Exceção — DiagnosisAgent**: O plano de diagnóstico usa `StrOutputParser` + parse manual de JSON. Isso é mais robusto para modelos que retornam JSON em markdown fence (```` ```json ````...) em vez de function call. O fallback strip de fences e tenta `json.loads()` antes de aceitar a resposta.
+
+## Padrão de Diagnóstico em Dois Passes
+
+O `DiagnosisAgent` faz duas chamadas LLM separadas antes de entregar o plano:
+
+```
+Passe 1: DataFrameFlowAnalysis (chain: _flow_chain)
+   ↓ resultado embeds no payload do passe 2
+Passe 2: DiagnosisPlan completo (chain: _chain)
+```
+
+**Razão**: Pedir ao LLM para identificar fluxos producer→consumer E planejar steps em um único prompt produz resultados menos precisos — o modelo tende a negligenciar um dos dois. Separar em dois passes melhora a qualidade do agrupamento de arquivos acoplados.
+
+**Fallback**: Se `_flow_chain` retornar `None` (Gemini falha em function call para schemas complexos), o agente usa `_raw_flow_chain` (StrOutputParser) + parse manual como fallback.
 
 ## Padrão de Retry Estruturado
 
@@ -126,6 +140,22 @@ Para arquivos com dependência cross-file (produtor → consumidor), o diagnóst
 
 **Razão**: Se loaders.py é migrado para Polars mas quality.py ainda usa pandas API, o test suite falha. Migrando tudo junto, os testes passam atomicamente.
 
+**Implementação two-phase no MigrationAgent**:
+- Fase 1: gera código migrado para cada arquivo em memória (sem escrever em disco)
+- Fase 2: só persiste se TODOS os arquivos produziram output LLM válido. Se algum falhou (`llm_failure`), nenhum arquivo é escrito — o projeto fica no estado anterior (que pode ser restaurado do snapshot).
+
+## Padrão de Scoped Retry Feedback
+
+Em grouped steps, o mesmo feedback de validação é reutilizado para todos os arquivos. Para evitar que erros de um arquivo (ex: `pivot_table error in features.py`) contaminem a migração de outro arquivo do grupo (ex: `loaders.py`), o agente prefixa o feedback com âncora explícita:
+
+```python
+"You are migrating `src/analytics/loaders.py`. "
+"Focus only on what needs to change in this file.\n\n"
++ original_feedback
+```
+
+Isso resolve structured-output failures que ocorrem quando o LLM recebe contexto irrelevante e confunde o schema esperado.
+
 ## Padrão de Fallback Determinístico (AST Transformer)
 
 O `ast_transformer.py` é um fallback para padrões que LLMs menores consistentemente erram:
@@ -151,13 +181,24 @@ O transformer opera em 3 passes independentes, cada um re-parseando o output do 
 
 ```
 src/
-├── agents/    # Cada agente é uma classe com método principal público
-├── graph/     # Nodes (funções puras) + State (TypedDict) + workflow (composição)
-├── tools/     # Funções puras sem estado, usadas pelos agentes
+├── agents/     # Cada agente é uma classe com método principal público
+├── graph/      # Sub-módulos de nós do grafo + state + workflow
+│   ├── state.py          # WorkflowState (dataclass) e GraphState (TypedDict)
+│   ├── workflow.py       # run_simple_workflow() — composição final
+│   ├── diagnosis_flow.py # DiagnosisRunner protocol + build_diagnosis_node()
+│   ├── migration_flow.py # select_next_step, build_snapshot_node, build_migration_node
+│   └── validation_flow.py # build_validation_node, route_after_validation
+├── tools/      # Funções puras sem estado, usadas pelos agentes
+├── llm.py      # Fábrica de LLM — única dependência de env vars LLM_PROVIDER/LLM_MODEL
+├── llm_proxy.py # LangChain callback que loga todas as chamadas em llm_proxy.jsonl
 └── evaluation/ # Funções de cálculo de métricas e formatação de report
 ```
 
-**Regra**: Agents dependem de Tools. Tools não dependem de Agents. Graph depende de Agents.
+**Regras de dependência**:
+- Agents dependem de Tools. Tools não dependem de Agents.
+- Graph depende de Agents (via Protocols — desacoplamento para testabilidade).
+- `llm.py` é o único ponto de acesso ao LLM; agentes não instanciam modelos diretamente.
+- Graph sub-modules usam Protocols (`DiagnosisRunner`, `MigrationRunner`, `ValidationRunner`, `RepairRunner`) para desacoplar testes.
 
 ## Convenções de Nomenclatura
 
@@ -171,11 +212,11 @@ src/
 
 ```
 tests/
-├── test_benchmark_structure.py   # Testes do DiagnosisAgent (sanitização, agrupamento)
-├── test_pattern_scanner.py       # Testes das detecções do scanner
-├── test_ast_transformer.py       # Testes de cada pass do transformer
-├── test_migration_agent.py       # Testes do symbol scoping, requirements migration
-└── test_workflow_migration_graph.py  # Testes end-to-end com mocks de LLM
+├── test_benchmark_structure.py        # Testes do DiagnosisAgent (sanitização, agrupamento)
+├── test_pattern_scanner.py            # Testes das detecções do scanner
+├── test_ast_transformer.py            # Testes de cada pass do transformer
+├── test_migration_agent.py            # Testes do symbol scoping, requirements migration
+└── test_workflow_migration_graph.py   # Testes end-to-end com mocks de LLM
 ```
 
-Testes do framework nunca tocam projetos reais: usam `tmp_path` (pytest fixture) para criar projetos sintéticos.
+Testes do framework nunca tocam projetos reais: usam `tmp_path` (pytest fixture) para criar projetos sintéticos. Os Protocols no `graph/` permitem substituir os agentes por mocks sem patch de módulo.

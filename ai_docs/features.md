@@ -18,30 +18,46 @@
 
 ### 2. DiagnosisAgent — Planejamento de Migração
 
-**Descrição**: Analisa o projeto em modo read-only e gera um plano ordenado de steps, com análise de dependência cross-file (DataFrame flow).
+**Descrição**: Analisa o projeto em modo read-only e gera um plano ordenado de steps, usando dois passes LLM distintos.
+
+**Estratégia de dois passes**:
+1. **Passe 1 — DataFrameFlowAnalysis**: LLM analisa apenas o fluxo produtor→consumidor de DataFrames entre arquivos. Produz `DataFrameFlowAnalysis` com symbols, groups e planning_strategy.
+2. **Passe 2 — DiagnosisPlan**: LLM recebe o resultado do passe 1 como contexto e gera o plano completo de migração com todos os steps.
+
+A separação evita que o LLM tente analisar dependências e planejar steps ao mesmo tempo — o passe 1 é mais focado e produz resultado mais preciso.
 
 **Capacidades**:
 - Detecta arquivos afetados via análise AST de imports e chamadas de API
-- Analisa fluxo producer→consumer de DataFrames entre arquivos
-- Divide arquivos em steps por símbolo quando independentes (auditabilidade granular)
-- Agrupa arquivos acoplados em steps atômicos (corretude de testes)
+- Analisa fluxo producer→consumer de DataFrames entre arquivos (passe 1)
+- Divide arquivos em steps por símbolo quando independentes, em ordem topológica
+- Agrupa arquivos acoplados em steps atômicos (strategy: `grouped_before_consumers`)
 - Detecta se `requirements.txt` precisa ser atualizado com target library
+- Fallback de parsing: usa `StrOutputParser` + JSON manual em vez de `with_structured_output` para o plano (mais robusto a modelos que retornam texto em vez de function call)
+- Deduplicação e sanitização de steps planejados com avisos auditáveis
 
-**Arquivo de output**: `logs/diagnosis_plan.json`
+**Arquivos de output**: `logs/diagnosis_plan.json`, `logs/dataframe_flow_analysis.json`, `logs/project_audit.json`
 
 ---
 
 ### 3. MigrationAgent — Execução de Steps
 
-**Descrição**: Recebe um step planejado e produz código migrado usando LLM + validações determinísticas.
+**Descrição**: Recebe um step planejado e produz código migrado usando LLM + múltiplas camadas de validação determinística.
 
-**Pipeline interno**:
-1. LLM migration com prompt contextual (padrão API mapping + pattern analysis)
-2. Symbol scoping (preserva código fora do escopo do step)
-3. Syntax validation Python 3.9
-4. Re-scan pós-migração (detecta padrões pandas não convertidos)
+**Pipeline interno (por arquivo)**:
+1. LLM migration com prompt contextual (pattern analysis + retry feedback se retry)
+2. Symbol scoping (AST merge — substitui apenas os símbolos permitidos no arquivo original)
+3. Syntax validation Python 3.9 (detecta PEP 604 `X | Y` sem `__future__` annotations)
+4. Re-scan pós-migração (detecta padrões pandas remanescentes → retry automático uma vez)
 5. AST fallback determinístico (se `MIGRATION_AST_FALLBACK=1`)
-6. Implementation review (se DataFrame flow analysis presente)
+6. Implementation review (se `dataframe_flow_analysis` presente no step)
+7. Limpeza automática de `import pandas as pd` não utilizado após symbol scoping
+
+**Grouped steps (dois-fases atômicas)**:
+- Fase 1: migra todos os arquivos do grupo em memória (sem escrever em disco)
+- Fase 2: só escreve se TODOS os arquivos produziram output LLM válido (evita estado híbrido parcial)
+- Feedback de retry é escopado por arquivo (`_scoped_retry_feedback`) para evitar que erros de um arquivo contaminem a migração de outro
+
+**Suporte a hash-locked requirements**: Quando `requirements.txt` usa `--hash=sha256:`, o agente resolve os hashes da versão mais recente via PyPI API e insere as entradas corretas.
 
 **Arquivo de output**: `logs/step_NNN_migration.json`
 
@@ -102,7 +118,25 @@ Só é invocado quando `dataframe_flow_analysis` está presente no step (projeto
 
 ---
 
-### 7. Pattern Scanner — Detecção Estática de Padrões Confusos
+### 7. Ferramentas Determinísticas de Suporte
+
+**test_runner.py — Wrapper de pytest**:
+- `run_pytest(project_dir, log_file)` — executa `pytest -q` via subprocess, grava stdout em `log_file`, retorna `{"status": "passed"|"failed", "passed": bool, "returncode": int}`
+
+**diff_analyzer.py — Comparação de diretórios**:
+- `changed_files(before, after)` — lista arquivos modificados entre dois snapshots
+- `unified_diff(before, after)` — executa `diff -ruN` e retorna texto do patch
+- `analyze_diff(before, after, allowed_files)` — retorna `out_of_scope_changes` e `out_of_scope_files`
+
+**output_comparator.py — Normalização de records**:
+- `normalize_records(value)` — converte Polars DataFrame (`.to_dicts()`) ou pandas DataFrame (`.to_dict(orient="records")`) para `list[dict]`, permitindo comparações agnósticas à biblioteca
+
+**patch_applier.py — Escrita atômica**:
+- `write_text_if_changed(path, content)` — só escreve se o conteúdo mudou; retorna `True` se escreveu. Evita toques desnecessários em disco nos snapshots.
+
+---
+
+### 8. Pattern Scanner — Detecção Estática de Padrões Confusos
 
 **Descrição**: Analisa código-fonte via AST e detecta padrões pandas que o LLM tende a não converter corretamente.
 
@@ -114,7 +148,7 @@ Só é invocado quando `dataframe_flow_analysis` está presente no step (projeto
 
 ---
 
-### 8. AST Transformer — Fallback Determinístico
+### 9. AST Transformer — Fallback Determinístico
 
 **Descrição**: Aplica transformações mecânicas pandas→polars que não dependem de julgamento do LLM. Ativo quando `MIGRATION_AST_FALLBACK=1`.
 
@@ -132,7 +166,7 @@ Só é invocado quando `dataframe_flow_analysis` está presente no step (projeto
 
 ---
 
-### 9. Benchmark Runner
+### 10. Benchmark Runner
 
 **Descrição**: Executa uma ou todas as tasks de benchmark e gera relatórios comparáveis.
 
@@ -149,7 +183,7 @@ python3 scripts/run_task.py task_001_read_csv_filter --skip-install
 
 ---
 
-### 10. Importação de Projetos Externos
+### 11. Importação de Projetos Externos
 
 **Descrição**: Importa um projeto GitHub para o formato de benchmark auditável.
 
@@ -161,7 +195,19 @@ Faz clone temporário, remove `.git`, copia para `benchmark/<task_id>/input_proj
 
 ---
 
-### 11. Preparação de Baseline
+### 12. Criação de Tasks de Benchmark
+
+**Descrição**: Cria a estrutura de diretórios e arquivos para uma nova task de benchmark do zero.
+
+```bash
+python3 scripts/create_benchmark_task.py <task_id>
+```
+
+Gera `benchmark/<task_id>/input_project/` com estrutura básica e `metadata.json` template.
+
+---
+
+### 13. Preparação de Baseline
 
 **Descrição**: Corrige problemas básicos de baseline em projetos importados (sem migrar a biblioteca).
 
@@ -177,7 +223,7 @@ Exemplos de correções: ajuste de `pytest.ini` de `test` para `tests`, criaçã
 
 ## Funcionalidades em Desenvolvimento / Não Testadas
 
-- **Tasks 4 e 5**: `task_004_pyjanitor` e `task_005_ydata_profiling` foram importadas mas ainda não executadas. Projetos reais com mais complexidade.
+- **Tasks sintéticas 019–026**: Criadas mas ainda não validadas com execução completa. Cobrem padrões mais complexos: pipelines multi-arquivo, `groupby().transform()`, `apply(axis=1)`, `period`, `expanding`, `concat`, `where`.
 - **Expansão para outras bibliotecas**: Arquitetura suporta qualquer par source→target library, mas nenhum além de pandas→polars foi validado.
 - **false_positives / false_negatives**: Campos nas métricas existem mas retornam sempre 0 (não implementados).
 

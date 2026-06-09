@@ -43,9 +43,9 @@ ANTHROPIC_API_KEY=<sua-chave>
 
 ### pytest (dos projetos migrados)
 
-**Tipo**: CLI local (via `subprocess.run`)
+**Tipo**: CLI local (via `src/tools/test_runner.py` → `subprocess.run`)
 
-**Uso**: Cada step de validação executa `python -m pytest -q` no `project_dir`.
+**Uso**: `run_pytest(project_dir, log_file)` executa `python -m pytest -q` no `project_dir` e salva saída em `log_file`.
 
 **Configuração**: O projeto de benchmark define seu próprio `pytest.ini` ou `setup.cfg`.
 
@@ -65,11 +65,23 @@ ANTHROPIC_API_KEY=<sua-chave>
 
 ### diff (sistema operacional)
 
-**Tipo**: CLI local (via `subprocess.run`)
+**Tipo**: CLI local (via `src/tools/diff_analyzer.py` → `subprocess.run`)
 
-**Uso**: `diff -ruN` para gerar o `diff.patch` final (comparação before_migration vs. projeto final).
+**Uso**: `unified_diff(before, after)` executa `diff -ruN` para gerar o `diff.patch` final.
+
+**Uso adicional**: `analyze_diff(before, after, allowed_files)` usa `filecmp.cmp` (sem subprocess) para detectar `out_of_scope_changes`.
 
 **Dependência**: Disponível por padrão em Linux/macOS. Windows pode precisar de WSL ou Git for Windows.
+
+---
+
+### PyPI API (para hash-locked requirements)
+
+**Tipo**: API HTTP (via `urllib.request`)
+
+**Uso**: Quando `requirements.txt` usa `--hash=sha256:`, o `MigrationAgent` consulta `https://pypi.org/pypi/<package>/json` para resolver hashes SHA256 da versão mais recente.
+
+**Cuidado**: Requer conectividade de rede durante a migração de projetos com requisitos hash-locked.
 
 ---
 
@@ -120,6 +132,8 @@ prompts/               # System prompts usados (para reprodução)
 ```
 
 Todos os arquivos JSON seguem schemas Pydantic definidos em `src/agents/`.
+
+**`logs/llm_proxy.jsonl`**: Arquivo de log de todas as chamadas ao LLM (uma entrada JSON por linha). Inclui eventos `request` (com modelo, timestamp e mensagens) e `response` (com `generations`, `tool_calls` para Anthropic, `function_call` para Gemini, e `usage`). É o primeiro lugar para inspecionar quando um agente produziu saída inesperada.
 
 ---
 

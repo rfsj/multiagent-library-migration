@@ -46,13 +46,27 @@ python3 scripts/run_all.py
 multiagent-library-migration/
 ├── src/
 │   ├── agents/          # 5 agentes LLM (diagnosis, migration, validation, repair, review)
-│   ├── graph/           # Orquestração LangGraph (state, workflow, flows)
-│   ├── tools/           # Ferramentas determinísticas (scanner, ast_transformer, diff)
+│   ├── graph/           # Orquestração LangGraph
+│   │   ├── state.py           # WorkflowState, GraphState, conversões
+│   │   ├── workflow.py        # run_simple_workflow() — ponto de entrada
+│   │   ├── diagnosis_flow.py  # build_diagnosis_node()
+│   │   ├── migration_flow.py  # select_next_step, build_snapshot_node, build_migration_node
+│   │   └── validation_flow.py # build_validation_node, route_after_validation
+│   ├── tools/           # Ferramentas determinísticas
+│   │   ├── pattern_scanner.py   # Detecção estática de padrões pandas
+│   │   ├── ast_transformer.py   # Transformações mecânicas pandas→polars
+│   │   ├── project_scanner.py   # Scan de imports e API calls
+│   │   ├── diff_analyzer.py     # Comparação de diretórios e diff
+│   │   ├── test_runner.py       # Wrapper para pytest via subprocess
+│   │   ├── output_comparator.py # Normalização de records pandas/polars
+│   │   └── patch_applier.py     # Escrita atômica de arquivos
+│   ├── llm.py           # Fábrica de LLM (Anthropic/Google via env)
+│   ├── llm_proxy.py     # Logger de todas as chamadas LLM (llm_proxy.jsonl)
 │   └── evaluation/      # Métricas e geração de relatórios
-├── prompts/             # System prompts versionados para cada agente
-├── benchmark/           # Tasks de benchmark (input_project + metadata.json)
+├── prompts/             # System prompts versionados (v1 e v2) para cada agente
+├── benchmark/           # 26 tasks de benchmark (task_001–task_026)
 ├── experiments/runs/    # Artefatos gerados por cada execução (gitignored)
-├── scripts/             # Entry points (run_task.py, run_all.py, import_github_project.py)
+├── scripts/             # Entry points (run_task.py, run_all.py, import_github_project.py, create_benchmark_task.py)
 ├── docs/                # Documentação do protocolo experimental
 └── tests/               # Testes do próprio framework
 ```

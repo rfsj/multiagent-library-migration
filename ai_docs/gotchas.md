@@ -264,7 +264,7 @@ df.with_columns(pl.col("tier").replace(order_map).alias("_sort_key")).sort("_sor
 
 **Causa**: `.gitignore` inclui `benchmark/` para evitar versionar clones externos e dados de experimento local.
 
-**Solução**: Criar tasks manualmente (`scripts/create_benchmark_task.py`) ou importar via `scripts/import_github_project.py`. As tasks fornecidas (task_001 a task_005) precisam ser recriadas em cada clone.
+**Solução**: Criar tasks manualmente (`scripts/create_benchmark_task.py`) ou importar via `scripts/import_github_project.py`. As 26 tasks (task_001 a task_026) existem apenas localmente e precisam ser recriadas em cada clone.
 
 ---
 
