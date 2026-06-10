@@ -77,6 +77,7 @@ class FakeValidationAgent:
         before_snapshot: dict,
         validation_evidence: dict,
         logs_dir: Path,
+        retry_count: int = 0,
     ):
         return {
             "agent": "validation_agent",
@@ -136,6 +137,7 @@ class RejectFirstStepValidationAgent(FakeValidationAgent):
         before_snapshot: dict,
         validation_evidence: dict,
         logs_dir: Path,
+        retry_count: int = 0,
     ):
         if planned_step["step_id"] == "step_001":
             return {
@@ -176,6 +178,7 @@ class RepairableRejectValidationAgent(FakeValidationAgent):
         before_snapshot: dict,
         validation_evidence: dict,
         logs_dir: Path,
+        retry_count: int = 0,
     ):
         return {
             "agent": "validation_agent",

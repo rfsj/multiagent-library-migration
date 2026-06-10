@@ -9,12 +9,45 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 _log_path: Path | None = None
+_call_counts: dict[str, int] = {}
+_current_label: str | None = None
 
 
 def configure(log_path: Path) -> None:
     global _log_path
     _log_path = log_path
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    reset_counts()
+
+
+def set_label(label: str | None) -> None:
+    """Tag subsequent LLM calls so they can be counted per workflow phase/step.
+
+    The workflow runs single-threaded inside LangGraph's ``invoke``, so a module
+    global is enough to attribute every nested LLM call (migration, regeneration,
+    review, repair) to the step that triggered it.
+    """
+    global _current_label
+    _current_label = label
+
+
+def reset_counts() -> None:
+    global _current_label
+    _call_counts.clear()
+    _current_label = None
+
+
+def call_counts() -> dict[str, int]:
+    return dict(_call_counts)
+
+
+def total_calls() -> int:
+    return sum(_call_counts.values())
+
+
+def _record_call() -> None:
+    label = _current_label or "unlabeled"
+    _call_counts[label] = _call_counts.get(label, 0) + 1
 
 
 def get_callback() -> LLMProxyLogger | None:
@@ -40,10 +73,12 @@ class LLMProxyLogger(BaseCallbackHandler):
     ) -> None:
         kwargs_model = (kwargs.get("invocation_params") or {}).get("model") or (kwargs.get("invocation_params") or {}).get("model_name")
         model_id = kwargs_model or serialized.get("name") or (serialized.get("id") or ["unknown"])[-1]
+        _record_call()
         self._write({
             "event": "request",
             "ts": datetime.now().isoformat(),
             "run_id": str(kwargs.get("run_id", "")),
+            "label": _current_label or "unlabeled",
             "model": model_id,
             "messages": [
                 [{"role": m.type, "content": m.content} for m in batch]

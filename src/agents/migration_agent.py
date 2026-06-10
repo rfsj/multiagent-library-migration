@@ -12,7 +12,6 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.llm import get_llm
 from src.tools.ast_transformer import apply_ast_transforms, ast_fallback_enabled
 from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusing_patterns
@@ -20,7 +19,6 @@ from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusin
 load_dotenv()
 
 _PROMPTS_DIR = Path(__file__).parents[2] / "prompts"
-MAX_IMPLEMENTATION_REVIEW_REVISIONS = 2
 MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS = 2
 
 _HUMAN_TEMPLATE = """\
@@ -79,7 +77,7 @@ class MigrationAgent:
 
     name = "migration_agent"
 
-    def __init__(self, implementation_review_agent: ImplementationReviewAgent | None = None) -> None:
+    def __init__(self) -> None:
         system_prompt = (_PROMPTS_DIR / "migration_agent_v2.md").read_text(encoding="utf-8")
         llm = get_llm().with_structured_output(MigrationResult)
         self._chain = (
@@ -88,9 +86,6 @@ class MigrationAgent:
                 ("human", _HUMAN_TEMPLATE),
             ])
             | llm
-        )
-        self._implementation_review_agent = (
-            implementation_review_agent or ImplementationReviewAgent()
         )
         self._current_unmigrated_patterns: list[dict[str, Any]] = []
 
@@ -270,47 +265,6 @@ class MigrationAgent:
             ast_result = apply_ast_transforms(migrated, source_library)
             migrated = ast_result.code
 
-        revision_index = 0
-        review = self._review_migrated_code(rel_file, source, migrated, step, logs_dir)
-        while (
-            review
-            and review["status"] == "needs_revision"
-            and revision_index < MAX_IMPLEMENTATION_REVIEW_REVISIONS
-        ):
-            revision_index += 1
-            migrated, rev_attempts, rev_error = self._invoke_migration_chain(
-                rel_file,
-                source,
-                step,
-                {"feedback_for_agent": _review_feedback_for_migration(review, migrated)},
-            )
-            total_attempts += rev_attempts
-            if rev_error:
-                last_error = rev_error
-            if allowed_symbols:
-                migrated = self._apply_allowed_symbol_scope(
-                    source, migrated, allowed_symbols
-                )
-            migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
-                rel_file, source, step, migrated, allowed_symbols
-            )
-            total_attempts += regen_attempts
-            if regen_error:
-                last_error = regen_error
-            suffix = (
-                "implementation_review_after_revision"
-                if revision_index == 1
-                else f"implementation_review_after_revision_{revision_index}"
-            )
-            review = self._review_migrated_code(
-                rel_file,
-                source,
-                migrated,
-                step,
-                logs_dir,
-                log_suffix=suffix,
-            )
-
         return migrated, total_attempts, last_error
 
     def _regenerate_if_invalid_python(
@@ -381,32 +335,6 @@ class MigrationAgent:
                 return migrated_code, attempt, ""
 
         return source, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS, "MigrationAgent returned no structured output."
-
-    def _review_migrated_code(
-        self,
-        rel_file: Path,
-        original: str,
-        migrated: str,
-        step: dict[str, Any],
-        logs_dir: Path,
-        log_suffix: str = "implementation_review",
-    ) -> dict[str, Any] | None:
-        dataframe_flow_analysis = step.get("dataframe_flow_analysis")
-        if not dataframe_flow_analysis:
-            return None
-        if rel_file.suffix != ".py":
-            return None
-        if migrated == original:
-            return None
-        return self._implementation_review_agent.review(
-            rel_file=rel_file,
-            original_code=original,
-            migrated_code=migrated,
-            planned_step=step,
-            dataframe_flow_analysis=dataframe_flow_analysis,
-            logs_dir=logs_dir,
-            log_suffix=log_suffix,
-        )
 
     def _apply_allowed_symbol_scope(
         self,
@@ -702,31 +630,6 @@ class MigrationAgent:
 
 def _normalize_package_name(name: str) -> str:
     return name.replace("_", "-").lower()
-
-
-def _review_feedback_for_migration(review: dict[str, Any], migrated_code: str) -> str:
-    issues = review.get("issues", [])
-    per_issue_instructions = [
-        f"- [{issue.get('kind', 'issue')}] {issue.get('revision_instruction', '').strip()}"
-        for issue in issues
-        if issue.get("revision_instruction", "").strip()
-    ]
-    top_level = review.get("revision_instructions", "").strip()
-    if per_issue_instructions:
-        instructions_block = "\n".join(per_issue_instructions)
-    elif top_level:
-        instructions_block = top_level
-    else:
-        instructions_block = "Revise the migration to address the listed issues."
-    return (
-        "Implementation review requested a revision before validation.\n\n"
-        f"Issues:\n{json.dumps(issues, indent=2)}\n\n"
-        f"Revision instructions:\n{instructions_block}\n\n"
-        "Previous migrated code:\n"
-        "```python\n"
-        f"{migrated_code}\n"
-        "```"
-    )
 
 
 def _retry_feedback_context(retry_feedback: dict[str, Any] | str) -> str:
