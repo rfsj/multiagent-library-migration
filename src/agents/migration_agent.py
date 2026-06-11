@@ -13,7 +13,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from src.llm import get_llm
-from src.tools.ast_transformer import apply_ast_transforms, ast_fallback_enabled
+from src.migration_config import MigrationConfig
+from src.tools.ast_transformer import apply_ast_transforms
 from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusing_patterns
 
 load_dotenv()
@@ -77,7 +78,7 @@ class MigrationAgent:
 
     name = "migration_agent"
 
-    def __init__(self) -> None:
+    def __init__(self, config: MigrationConfig | None = None) -> None:
         system_prompt = (_PROMPTS_DIR / "migration_agent_v2.md").read_text(encoding="utf-8")
         llm = get_llm().with_structured_output(MigrationResult)
         self._chain = (
@@ -87,7 +88,15 @@ class MigrationAgent:
             ])
             | llm
         )
+        self._config = config or MigrationConfig.from_env()
         self._current_unmigrated_patterns: list[dict[str, Any]] = []
+
+    @property
+    def _cfg(self) -> MigrationConfig:
+        # Tests build the agent via __new__/monkeypatched __init__ to exercise the
+        # assisted pipeline; fall back to that preset when no config was injected.
+        cfg = getattr(self, "_config", None)
+        return cfg if cfg is not None else MigrationConfig.assisted()
 
 
     def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
@@ -102,7 +111,7 @@ class MigrationAgent:
         original = target.read_text(encoding="utf-8")
 
         retry_feedback = step.get("retry_feedback")
-        migrated, total_attempts, last_error = self._migrate_file_with_llm(
+        migrated, total_attempts, last_error, pipeline = self._migrate_file_with_llm(
             rel_file,
             original,
             step,
@@ -129,6 +138,7 @@ class MigrationAgent:
             "status": "completed" if changed_files else "no_change",
             "retry_feedback_received": bool(retry_feedback),
             "unmigrated_patterns": self._current_unmigrated_patterns,
+            "pipeline": pipeline,
         }
         if total_attempts:
             result["structured_output_attempts"] = total_attempts
@@ -168,7 +178,7 @@ class MigrationAgent:
                 step.get("retry_feedback"), rel_file_str
             )
 
-            migrated, file_attempts, file_error = self._migrate_file_with_llm(
+            migrated, file_attempts, file_error, file_pipeline = self._migrate_file_with_llm(
                 rel_file,
                 original,
                 file_step,
@@ -182,6 +192,7 @@ class MigrationAgent:
                     "changed": migrated != original,
                     "structured_output_attempts": file_attempts,
                     "structured_output_error": file_error,
+                    "pipeline": file_pipeline,
                 }
             )
 
@@ -232,40 +243,68 @@ class MigrationAgent:
         step: dict[str, Any],
         retry_feedback: dict[str, Any] | str | None,
         logs_dir: Path,
-    ) -> tuple[str, int, str]:
+    ) -> tuple[str, int, str, dict[str, Any]]:
         if rel_file.name == "requirements.txt":
-            return self._migrate_requirements(source, step), 0, ""
+            return self._migrate_requirements(source, step), 0, "", _empty_pipeline()
 
         if rel_file.suffix != ".py":
-            return source, 0, ""
+            return source, 0, "", _empty_pipeline()
 
         allowed_symbols = step.get("allowed_symbols", [])
         migrated, total_attempts, last_error = self._invoke_migration_chain(
             rel_file, source, step, retry_feedback
         )
-        if allowed_symbols:
-            migrated = self._apply_allowed_symbol_scope(source, migrated, allowed_symbols)
+        # Capture the unaided first-pass output before any post-processing so the
+        # raw LLM signal can be measured even on assisted runs (see
+        # ai_docs/proposal-research-mode.md).
+        raw_llm_code = migrated
+        layers_active: list[str] = []
+        cfg = self._cfg
 
-        migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
-            rel_file, source, step, migrated, allowed_symbols
-        )
-        total_attempts += regen_attempts
-        if regen_error:
-            last_error = regen_error
+        if allowed_symbols and cfg.enforce_symbol_scope:
+            scoped = self._apply_allowed_symbol_scope(source, migrated, allowed_symbols)
+            if scoped != migrated:
+                layers_active.append("scope")
+            migrated = scoped
 
-        migrated, rescan_attempts, rescan_error = self._rescan_and_retry_if_patterns_remain(
-            rel_file, source, step, migrated, allowed_symbols
-        )
-        total_attempts += rescan_attempts
-        if rescan_error:
-            last_error = rescan_error
+        if cfg.regenerate_invalid_syntax:
+            migrated, regen_attempts, regen_error = self._regenerate_if_invalid_python(
+                rel_file, source, step, migrated, allowed_symbols
+            )
+            total_attempts += regen_attempts
+            if regen_attempts:
+                layers_active.append("syntax_regen")
+            if regen_error:
+                last_error = regen_error
 
-        if ast_fallback_enabled() and rel_file.suffix == ".py":
+        if cfg.use_rescan_retry:
+            before_rescan = migrated
+            migrated, rescan_attempts, rescan_error = self._rescan_and_retry_if_patterns_remain(
+                rel_file, source, step, migrated, allowed_symbols
+            )
+            total_attempts += rescan_attempts
+            if migrated != before_rescan:
+                layers_active.append("rescan")
+            if rescan_error:
+                last_error = rescan_error
+
+        changed_by_ast = False
+        if cfg.use_ast_fallback and rel_file.suffix == ".py":
             source_library = step.get("source_library", "pandas")
             ast_result = apply_ast_transforms(migrated, source_library)
+            changed_by_ast = ast_result.code != migrated
+            if changed_by_ast:
+                layers_active.append("ast")
             migrated = ast_result.code
 
-        return migrated, total_attempts, last_error
+        pipeline = {
+            "raw_llm_code": raw_llm_code,
+            "final_code": migrated,
+            "raw_equals_final": raw_llm_code == migrated,
+            "changed_by_ast": changed_by_ast,
+            "layers_active": layers_active,
+        }
+        return migrated, total_attempts, last_error, pipeline
 
     def _regenerate_if_invalid_python(
         self,
@@ -311,7 +350,11 @@ class MigrationAgent:
             retry_feedback_context = _retry_feedback_context(retry_feedback)
 
         source_library = step.get("source_library", "pandas")
-        hits = scan_for_confusing_patterns(source, source_library, allowed_symbols or None)
+        hits = (
+            scan_for_confusing_patterns(source, source_library, allowed_symbols or None)
+            if self._cfg.use_pattern_scanner
+            else []
+        )
         prompt_payload = {
             "source_library": source_library,
             "target_library": step.get("target_library", "polars"),
@@ -626,6 +669,18 @@ class MigrationAgent:
             url = f"https://pypi.org/pypi/{package_name}/json"
         with urllib.request.urlopen(url, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
+
+
+def _empty_pipeline() -> dict[str, Any]:
+    """Pipeline record for files that never go through the LLM migration chain
+    (requirements.txt, non-Python files)."""
+    return {
+        "raw_llm_code": None,
+        "final_code": None,
+        "raw_equals_final": True,
+        "changed_by_ast": False,
+        "layers_active": [],
+    }
 
 
 def _normalize_package_name(name: str) -> str:

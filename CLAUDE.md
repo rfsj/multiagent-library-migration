@@ -42,10 +42,16 @@ python3 -m pytest tests/ -q
 LLM_PROVIDER=google          # ou "anthropic"
 LLM_MODEL=gemini-3.1-flash-lite
 GOOGLE_API_KEY=...
-MIGRATION_AST_FALLBACK=1     # recomendado para modelos menores
+MIGRATION_MODE=assisted      # research (default, LLM puro) ou assisted (pipeline completo + AST)
 ```
 
-Modelos recomendados: `gemini-3.1-flash-lite` + AST (custo/benefício), `gemini-2.5-pro` (maior qualidade, pode dar timeout em arquivos grandes).
+`MIGRATION_MODE` controla a assistência determinística: `research` (default) roda o
+LLM puro para estudar o modelo; `assisted` liga todas as camadas (scanner, rescan, AST,
+syntax-regen, scope). Para ligar/desligar uma camada isolada em qualquer modo use
+`MIGRATION_USE_AST`, `MIGRATION_USE_SCANNER`, `MIGRATION_USE_RESCAN`,
+`MIGRATION_USE_SYNTAX_REGEN`, `MIGRATION_USE_SCOPE`. Ver `ai_docs/proposal-research-mode.md`.
+
+Modelos recomendados: `gemini-3.1-flash-lite` + `assisted` (custo/benefício), `gemini-2.5-pro` (maior qualidade, pode dar timeout em arquivos grandes).
 
 ## Restrições Críticas (ver business-rules.md)
 

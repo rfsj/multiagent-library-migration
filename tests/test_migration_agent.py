@@ -8,6 +8,7 @@ from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.agents.migration_agent import MigrationAgent, _retry_feedback_context
 from src.agents.repair_agent import RepairAgent
 from src.agents.validation_agent import _actionable_validation_feedback
+from src.migration_config import MigrationConfig
 
 
 class FakeMigrationChain:
@@ -519,6 +520,78 @@ def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
     assert "import pandas as pd" not in migrated
     assert "import polars as pl" in migrated
     assert "pd." not in migrated
+
+
+def _raw_pandas_assignment_output():
+    # df["x"] = ... is exactly what the AST fallback rewrites to with_columns.
+    return (
+        "import polars as pl\n\n\n"
+        "def load(df):\n"
+        "    df[\"x\"] = df[\"a\"]\n"
+        "    return df\n"
+    )
+
+
+def _run_single_py_step(agent, tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    (source_dir / "p.py").write_text('import pandas as pd\n\n\ndef load(df):\n    return df\n', encoding="utf-8")
+    agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/p.py",
+            "allowed_files": ["src/p.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+    log = json.loads((logs_dir / "step_001_migration.json").read_text(encoding="utf-8"))
+    code = (source_dir / "p.py").read_text(encoding="utf-8")
+    return log, code
+
+
+def test_research_mode_is_single_pass_raw(tmp_path):
+    raw = _raw_pandas_assignment_output()
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([raw])
+    agent._config = MigrationConfig.research()
+
+    log, code = _run_single_py_step(agent, tmp_path)
+
+    # No deterministic layer touched the output: file on disk == raw LLM output,
+    # the AST fallback did NOT rewrite df["x"] = ..., single LLM call.
+    assert log["pipeline"]["raw_llm_code"] == raw
+    assert log["pipeline"]["layers_active"] == []
+    assert log["pipeline"]["changed_by_ast"] is False
+    assert code == raw
+    assert len(agent._chain.calls) == 1
+
+
+def test_ast_fallback_layer_rewrites_when_enabled(tmp_path):
+    # Isolate the AST toggle: same raw input as the research test, only the AST
+    # layer on. df["x"] = ... is rewritten to with_columns, proving the toggle.
+    raw = _raw_pandas_assignment_output()
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([raw])
+    agent._config = MigrationConfig(
+        use_pattern_scanner=False,
+        use_rescan_retry=False,
+        use_ast_fallback=True,
+        regenerate_invalid_syntax=False,
+        enforce_symbol_scope=False,
+    )
+
+    log, code = _run_single_py_step(agent, tmp_path)
+
+    assert log["pipeline"]["raw_llm_code"] == raw
+    assert log["pipeline"]["changed_by_ast"] is True
+    assert "ast" in log["pipeline"]["layers_active"]
+    assert "with_columns" in code
+    assert 'df["x"] =' not in code
 
 
 def test_migration_does_not_run_pre_pytest_review_loop(tmp_path):

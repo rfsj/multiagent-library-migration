@@ -18,6 +18,7 @@ from src.agents.validation_agent import ValidationAgent
 from src.evaluation.metrics import build_metrics
 from src.evaluation.report_generator import environment_versions, git_commit, write_report
 from src.evaluation.semantic_probe import run_semantic_probe
+from src.migration_config import MigrationConfig
 from src.graph.state import WorkflowState
 from src.graph.workflow import run_simple_workflow
 from src.tools.diff_analyzer import unified_diff
@@ -239,6 +240,7 @@ def _build_report(
         "target_library": metadata["target_library"],
         **metrics,
         "semantic_risks": semantic_risks,
+        "migration_config": MigrationConfig.from_env().as_dict(),
         "llm_calls": {
             "total": llm_proxy.total_calls(),
             "by_label": llm_proxy.call_counts(),
