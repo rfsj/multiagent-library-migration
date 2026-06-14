@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from src import llm_proxy
 from src.graph.state import GraphState, require_current_step
 
 
@@ -65,6 +66,7 @@ def build_snapshot_node(snapshots_dir: Path):
 def build_migration_node(migration_agent: MigrationRunner, logs_dir: Path):
     def migrate_step(graph_state: GraphState) -> dict[str, Any]:
         step = require_current_step(graph_state)
+        llm_proxy.set_label(f"migrate:{step['step_id']}")
         migration = migration_agent.run_step(graph_state["project_dir"], step, logs_dir)
         return {
             "migrations": [*graph_state["migrations"], migration],

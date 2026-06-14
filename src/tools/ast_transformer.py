@@ -1,7 +1,9 @@
 """Deterministic AST-based pandas→polars fallback transformer.
 
-Applied after LLM migration when MIGRATION_AST_FALLBACK=1 is set.
-Only converts patterns that map mechanically without semantic ambiguity.
+Applied after LLM migration when the AST layer is enabled (MIGRATION_USE_AST=1,
+or the `assisted` preset). Whether it runs is decided by MigrationConfig; this
+module just performs the transforms. Only converts patterns that map
+mechanically without semantic ambiguity.
 
 Transforms implemented:
 - df["col"] = rhs  →  df = df.with_columns(polars_rhs.alias("col"))
@@ -13,7 +15,6 @@ from __future__ import annotations
 
 import ast
 import copy
-import os
 from dataclasses import dataclass, field
 
 
@@ -22,11 +23,6 @@ class TransformResult:
     code: str
     applied: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
-
-
-def ast_fallback_enabled() -> bool:
-    """Return True when MIGRATION_AST_FALLBACK env var is truthy."""
-    return os.environ.get("MIGRATION_AST_FALLBACK", "").lower() in ("1", "true", "yes")
 
 
 def apply_ast_transforms(source: str, source_library: str = "pandas") -> TransformResult:

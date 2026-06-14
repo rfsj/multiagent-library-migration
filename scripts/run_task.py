@@ -13,9 +13,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src import llm_proxy
+from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.agents.validation_agent import ValidationAgent
 from src.evaluation.metrics import build_metrics
 from src.evaluation.report_generator import environment_versions, git_commit, write_report
+from src.evaluation.semantic_probe import run_semantic_probe
+from src.migration_config import MigrationConfig
 from src.graph.state import WorkflowState
 from src.graph.workflow import run_simple_workflow
 from src.tools.diff_analyzer import unified_diff
@@ -133,6 +136,18 @@ def main() -> int:
     diff_text = unified_diff(before_dir, project_dir)
     (run_dir / "diff.patch").write_text(diff_text, encoding="utf-8")
 
+    semantic_risks: list[dict] = []
+    if not state.abort_reason and final_validation.get("status") == "approved":
+        llm_proxy.set_label("semantic_probe")
+        semantic_risks = run_semantic_probe(
+            review_agent=ImplementationReviewAgent(),
+            diagnosis=state.diagnosis,
+            before_dir=before_dir,
+            project_dir=project_dir,
+            accepted_step_ids=_accepted_step_ids(state.verdicts),
+            logs_dir=logs_dir,
+        )
+
     report = _build_report(
         metadata=metadata,
         tests_before=tests_before,
@@ -148,6 +163,7 @@ def main() -> int:
         replan_count=state.replan_count,
         replan_history=state.replan_history,
         diagnosis=state.diagnosis,
+        semantic_risks=semantic_risks,
     )
     write_report(run_dir / "report.json", report)
     print(json.dumps(report, indent=2))
@@ -189,6 +205,13 @@ def _allowed_files_from_diagnosis(diagnosis: dict | None) -> list[str] | None:
     return sorted(allowed)
 
 
+def _accepted_step_ids(verdicts: list[dict]) -> list[str]:
+    latest_by_step: dict[str, str] = {}
+    for verdict in verdicts:
+        latest_by_step[verdict["step_id"]] = verdict["verdict"]
+    return [step_id for step_id, v in latest_by_step.items() if v == "accepted"]
+
+
 def _build_report(
     *,
     metadata: dict,
@@ -205,13 +228,23 @@ def _build_report(
     replan_count: int,
     replan_history: list[dict],
     diagnosis: dict | None = None,
+    semantic_risks: list[dict] | None = None,
 ) -> dict:
-    metrics = build_metrics(tests_before, tests_after, final_validation, retry_counts)
+    semantic_risks = semantic_risks or []
+    metrics = build_metrics(
+        tests_before, tests_after, final_validation, retry_counts, semantic_risks, verdicts
+    )
     return {
         "task_id": metadata["task_id"],
         "source_library": metadata["source_library"],
         "target_library": metadata["target_library"],
         **metrics,
+        "semantic_risks": semantic_risks,
+        "migration_config": MigrationConfig.from_env().as_dict(),
+        "llm_calls": {
+            "total": llm_proxy.total_calls(),
+            "by_label": llm_proxy.call_counts(),
+        },
         "project_audit": {
             "migration_needed": project_audit["migration_needed"],
             "affected_source_files": project_audit["affected_source_files"],

@@ -8,6 +8,7 @@ from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.agents.migration_agent import MigrationAgent, _retry_feedback_context
 from src.agents.repair_agent import RepairAgent
 from src.agents.validation_agent import _actionable_validation_feedback
+from src.migration_config import MigrationConfig
 
 
 class FakeMigrationChain:
@@ -18,69 +19,6 @@ class FakeMigrationChain:
     def invoke(self, payload):
         self.calls.append(payload)
         return SimpleNamespace(migrated_code=self.migrated_versions.pop(0))
-
-
-class FakeImplementationReviewAgent:
-    def __init__(self):
-        self.calls = []
-
-    def review(
-        self,
-        *,
-        rel_file,
-        original_code,
-        migrated_code,
-        planned_step,
-        dataframe_flow_analysis,
-        logs_dir,
-        log_suffix="implementation_review",
-    ):
-        self.calls.append(
-            {
-                "rel_file": rel_file,
-                "migrated_code": migrated_code,
-                "log_suffix": log_suffix,
-            }
-        )
-        if len(self.calls) == 1:
-            return {
-                "agent": "implementation_review_agent",
-                "step_id": planned_step["step_id"],
-                "file": str(rel_file),
-                "status": "needs_revision",
-                "issues": [
-                    {
-                        "kind": "dependent_polars_columns",
-                        "file": str(rel_file),
-                        "symbol": "load",
-                        "explanation": "Column created and reused too early.",
-                    }
-                ],
-                "revision_instructions": "Split dependent expressions into sequential steps.",
-                "confidence": "high",
-            }
-        return {
-            "agent": "implementation_review_agent",
-            "step_id": planned_step["step_id"],
-            "file": str(rel_file),
-            "status": "approved",
-            "issues": [],
-            "revision_instructions": "",
-            "confidence": "high",
-        }
-
-
-class NoopImplementationReviewAgent:
-    def review(self, **kwargs):
-        return {
-            "agent": "implementation_review_agent",
-            "step_id": kwargs["planned_step"]["step_id"],
-            "file": str(kwargs["rel_file"]),
-            "status": "approved",
-            "issues": [],
-            "revision_instructions": "",
-            "confidence": "high",
-        }
 
 
 class RuleBasedMigrationChain:
@@ -117,20 +55,11 @@ def rule_based_migrate(source):
 
 @pytest.fixture(autouse=True)
 def fake_migration_agent_llm(monkeypatch):
-    def fake_init(self, implementation_review_agent=None):
+    def fake_init(self):
         self._chain = RuleBasedMigrationChain()
-        self._implementation_review_agent = (
-            implementation_review_agent or NoopImplementationReviewAgent()
-        )
+        self._current_unmigrated_patterns = []
 
     monkeypatch.setattr(MigrationAgent, "__init__", fake_init)
-
-
-def make_migration_agent_with_fakes(migrated_versions):
-    agent = MigrationAgent.__new__(MigrationAgent)
-    agent._chain = FakeMigrationChain(migrated_versions)
-    agent._implementation_review_agent = FakeImplementationReviewAgent()
-    return agent
 
 
 def test_dependency_step_updates_only_requirements(tmp_path):
@@ -247,7 +176,6 @@ def test_migration_agent_retries_missing_structured_output(tmp_path):
     python_file.write_text("import pandas as pd\n", encoding="utf-8")
     agent = MigrationAgent.__new__(MigrationAgent)
     agent._chain = FakeMigrationChain([None, "import polars as pl\n"])
-    agent._implementation_review_agent = NoopImplementationReviewAgent()
 
     result = agent.run_step(
         project_dir,
@@ -277,7 +205,6 @@ def test_migration_agent_records_no_change_when_structured_output_missing(tmp_pa
     python_file.write_text(original, encoding="utf-8")
     agent = MigrationAgent.__new__(MigrationAgent)
     agent._chain = FakeMigrationChain([None, None])
-    agent._implementation_review_agent = NoopImplementationReviewAgent()
 
     result = agent.run_step(
         project_dir,
@@ -595,7 +522,83 @@ def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
     assert "pd." not in migrated
 
 
-def test_implementation_review_requests_second_migration_pass(tmp_path):
+def _raw_pandas_assignment_output():
+    # df["x"] = ... is exactly what the AST fallback rewrites to with_columns.
+    return (
+        "import polars as pl\n\n\n"
+        "def load(df):\n"
+        "    df[\"x\"] = df[\"a\"]\n"
+        "    return df\n"
+    )
+
+
+def _run_single_py_step(agent, tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    (source_dir / "p.py").write_text('import pandas as pd\n\n\ndef load(df):\n    return df\n', encoding="utf-8")
+    agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/p.py",
+            "allowed_files": ["src/p.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+    log = json.loads((logs_dir / "step_001_migration.json").read_text(encoding="utf-8"))
+    code = (source_dir / "p.py").read_text(encoding="utf-8")
+    return log, code
+
+
+def test_research_mode_is_single_pass_raw(tmp_path):
+    raw = _raw_pandas_assignment_output()
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([raw])
+    agent._config = MigrationConfig.research()
+
+    log, code = _run_single_py_step(agent, tmp_path)
+
+    # No deterministic layer touched the output: file on disk == raw LLM output,
+    # the AST fallback did NOT rewrite df["x"] = ..., single LLM call.
+    assert log["pipeline"]["raw_llm_code"] == raw
+    assert log["pipeline"]["layers_active"] == []
+    assert log["pipeline"]["changed_by_ast"] is False
+    assert code == raw
+    assert len(agent._chain.calls) == 1
+
+
+def test_ast_fallback_layer_rewrites_when_enabled(tmp_path):
+    # Isolate the AST toggle: same raw input as the research test, only the AST
+    # layer on. df["x"] = ... is rewritten to with_columns, proving the toggle.
+    raw = _raw_pandas_assignment_output()
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain([raw])
+    agent._config = MigrationConfig(
+        use_pattern_scanner=False,
+        use_rescan_retry=False,
+        use_ast_fallback=True,
+        regenerate_invalid_syntax=False,
+        enforce_symbol_scope=False,
+    )
+
+    log, code = _run_single_py_step(agent, tmp_path)
+
+    assert log["pipeline"]["raw_llm_code"] == raw
+    assert log["pipeline"]["changed_by_ast"] is True
+    assert "ast" in log["pipeline"]["layers_active"]
+    assert "with_columns" in code
+    assert 'df["x"] =' not in code
+
+
+def test_migration_does_not_run_pre_pytest_review_loop(tmp_path):
+    # After the judge fusion, migration is a single pass: scanner -> LLM -> scope
+    # -> AST. No implementation-review revision loop runs before validation, so a
+    # valid first migration is written with exactly one migration-chain call and no
+    # review dependency on the agent.
     project_dir = tmp_path / "project"
     source_dir = project_dir / "src"
     logs_dir = tmp_path / "logs"
@@ -607,11 +610,9 @@ def test_implementation_review_requests_second_migration_pass(tmp_path):
         "    return pd.read_csv(path)\n",
         encoding="utf-8",
     )
-    agent = make_migration_agent_with_fakes(
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeMigrationChain(
         [
-            "import polars as pl\n\n\n"
-            "def load(path):\n"
-            "    return broken_polars_code(path)\n",
             "import polars as pl\n\n\n"
             "def load(path):\n"
             "    return pl.read_csv(path)\n",
@@ -626,23 +627,14 @@ def test_implementation_review_requests_second_migration_pass(tmp_path):
             "allowed_files": ["src/processing.py"],
             "source_library": "pandas",
             "target_library": "polars",
-            "dataframe_flow_analysis": {
-                "symbols": [],
-                "groups": [],
-                "notes": [],
-            },
+            "dataframe_flow_analysis": {"symbols": [], "groups": [], "notes": []},
         },
         logs_dir,
     )
 
     assert result["status"] == "completed"
-    assert len(agent._chain.calls) == 2
-    assert "Implementation review requested a revision" in agent._chain.calls[1][
-        "retry_feedback_context"
-    ]
-    assert [
-        call["log_suffix"] for call in agent._implementation_review_agent.calls
-    ] == ["implementation_review", "implementation_review_after_revision"]
+    assert len(agent._chain.calls) == 1
+    assert not hasattr(agent, "_implementation_review_agent")
     assert python_file.read_text(encoding="utf-8") == (
         "import polars as pl\n\n\n"
         "def load(path):\n"

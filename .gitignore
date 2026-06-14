@@ -9,6 +9,8 @@ dist/
 experiments/runs/*
 !experiments/runs/.gitkeep
 experiments/old/
+experiments/*.jsonl
+experiments/summary_*.json
 uv.lock
 .env
 target/

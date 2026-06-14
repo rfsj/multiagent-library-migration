@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from src import llm_proxy
 from src.graph.state import GraphState, require_current_step
 
 MAX_STEP_RETRIES = 3
@@ -27,6 +28,7 @@ class ValidationRunner(Protocol):
         before_snapshot: dict[str, Any],
         validation_evidence: dict[str, Any],
         logs_dir: Path,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
         ...
 
@@ -52,6 +54,7 @@ def build_validation_node(
 ):
     def validate_step(graph_state: GraphState) -> dict[str, Any]:
         step = require_current_step(graph_state)
+        llm_proxy.set_label(f"validate:{step['step_id']}")
         snapshot_dir = graph_state["current_snapshot_dir"]
         migration = graph_state["current_migration"]
         if snapshot_dir is None:
@@ -71,6 +74,7 @@ def build_validation_node(
             before_snapshot=_build_before_snapshot(snapshot_dir, step),
             validation_evidence=validation,
             logs_dir=logs_dir,
+            retry_count=graph_state["retry_counts"].get(step["step_id"], 0),
         )
 
         updates: dict[str, Any] = {
@@ -210,6 +214,7 @@ def _build_retry_feedback(
     if repair_agent is None or not _has_repairable_validation_feedback(validation):
         return verdict["feedback_for_agent"]
 
+    llm_proxy.set_label(f"repair:{step['step_id']}")
     repair_plan = repair_agent.build_repair_plan(
         project_dir=project_dir,
         planned_step=step,

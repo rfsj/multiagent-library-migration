@@ -21,6 +21,11 @@ load_dotenv()
 
 _PROMPTS_DIR = Path(__file__).parents[2] / "prompts"
 
+# A rejection is first retried cheaply (deterministic implementation feedback).
+# Only once those retries stop converging do we pay for the LLM verdict, which
+# decides whether the fault is the implementation (retry) or the plan (replan).
+LLM_VERDICT_ESCALATE_AFTER = 1
+
 _HUMAN_TEMPLATE = """\
 Review the migration step and return a structured verdict.
 
@@ -102,6 +107,7 @@ class ValidationAgent:
         self._install_dependencies(project_dir, logs_dir / f"{step['step_id']}_install.log")
         tests = run_pytest(project_dir, logs_dir / f"{step['step_id']}_pytest.log")
         source_usage = self._source_usage_in_step_files(project_dir, step)
+        missing_symbols = self._missing_public_symbols(project_dir, before_dir, step)
         result = {
             "agent": self.name,
             "step_id": step["step_id"],
@@ -111,11 +117,13 @@ class ValidationAgent:
             "pytest_feedback": _pytest_failure_excerpt(tests),
             "old_imports_remaining": source_usage["old_imports_remaining"],
             "unmigrated_uses": source_usage["unmigrated_uses"],
+            "missing_public_symbols": missing_symbols,
             "status": "approved"
             if not out_of_scope
             and tests["passed"]
             and source_usage["old_imports_remaining"] == 0
             and source_usage["unmigrated_uses"] == 0
+            and not missing_symbols
             else "rejected",
         }
         (logs_dir / f"{step['step_id']}_validation.json").write_text(
@@ -130,32 +138,69 @@ class ValidationAgent:
         before_snapshot: dict[str, Any],
         validation_evidence: dict[str, Any],
         logs_dir: Path,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
+        # Acceptances and the first rejections are decided deterministically: pytest
+        # (the oracle) plus the AST scope/source-usage/missing-symbol checks already
+        # settle them, with no LLM cost. Only once cheap implementation retries stop
+        # converging (retry_count >= LLM_VERDICT_ESCALATE_AFTER) do we invoke the LLM
+        # verdict, whose job is to attribute the failure: implementation (retry) vs
+        # plan (replan). Semantic risks that tests cannot see are surfaced separately
+        # by the post-validation semantic probe.
         logs_dir.mkdir(parents=True, exist_ok=True)
-        deterministic_verdict = self._deterministic_step_verdict(
-            planned_step,
-            migration_result,
-            validation_evidence,
-        )
-        if deterministic_verdict is not None:
-            (logs_dir / f"{planned_step['step_id']}_verdict.json").write_text(
-                json.dumps(deterministic_verdict, indent=2), encoding="utf-8"
+        if (
+            validation_evidence.get("status") == "rejected"
+            and retry_count >= LLM_VERDICT_ESCALATE_AFTER
+        ):
+            verdict = self._llm_step_verdict(
+                planned_step, migration_result, before_snapshot, validation_evidence
             )
-            return deterministic_verdict
+        else:
+            verdict = self._deterministic_step_verdict(
+                planned_step, migration_result, validation_evidence
+            )
+        (logs_dir / f"{planned_step['step_id']}_verdict.json").write_text(
+            json.dumps(verdict, indent=2), encoding="utf-8"
+        )
+        return verdict
 
+    def _llm_step_verdict(
+        self,
+        planned_step: dict[str, Any],
+        migration_result: dict[str, Any],
+        before_snapshot: dict[str, Any],
+        validation_evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ask the LLM judge to attribute a non-converging rejection to the
+        implementation (``rejected_implementation`` → retry) or the plan
+        (``rejected_plan`` → replan). Falls back to a deterministic implementation
+        rejection if the model returns no structured output."""
         result = self._get_chain().invoke({
             "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
             "migration_result": json.dumps(migration_result, indent=2, sort_keys=True),
             "before_snapshot": json.dumps(before_snapshot, indent=2, sort_keys=True),
             "validation_evidence": json.dumps(validation_evidence, indent=2, sort_keys=True),
         })
-        verdict_payload = result.model_dump() if isinstance(result, ValidationVerdict) else dict(result)
+        if not isinstance(result, ValidationVerdict):
+            return self._deterministic_step_verdict(
+                planned_step, migration_result, validation_evidence
+            )
         verdict = {"agent": self.name}
-        verdict.update(verdict_payload)
-        (logs_dir / f"{planned_step['step_id']}_verdict.json").write_text(
-            json.dumps(verdict, indent=2), encoding="utf-8"
-        )
+        verdict.update(result.model_dump())
         return verdict
+
+    def _get_chain(self):
+        if self._chain is None:
+            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(encoding="utf-8")
+            llm = get_llm().with_structured_output(ValidationVerdict)
+            self._chain = (
+                ChatPromptTemplate.from_messages([
+                    SystemMessage(content=system_prompt),
+                    ("human", _HUMAN_TEMPLATE),
+                ])
+                | llm
+            )
+        return self._chain
 
     def final_validate(
         self,
@@ -250,22 +295,48 @@ class ValidationAgent:
         allowed_symbols = step.get("allowed_symbols", [])
         return _ast_count_source_usage(tree, source_library, allowed_symbols)
 
+    def _missing_public_symbols(
+        self,
+        project_dir: Path,
+        before_dir: Path,
+        step: dict[str, Any],
+    ) -> list[str]:
+        """Top-level public functions/classes present before the step but dropped
+        by the migration. Deterministic safety net against an agent that deletes or
+        renames a public symbol (which breaks tests or downstream imports)."""
+        missing: set[str] = set()
+        for rel in step.get("files") or [step["file"]]:
+            rel = Path(rel)
+            if rel.suffix != ".py":
+                continue
+            before = before_dir / rel
+            after = project_dir / rel
+            if not before.exists() or not after.exists():
+                continue
+            missing.update(
+                _missing_top_level_symbols(
+                    before.read_text(encoding="utf-8"),
+                    after.read_text(encoding="utf-8"),
+                )
+            )
+        return sorted(missing)
+
     def _deterministic_step_verdict(
         self,
         planned_step: dict[str, Any],
         migration_result: dict[str, Any],
         validation_evidence: dict[str, Any],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         step_id = planned_step["step_id"]
-        if validation_evidence.get("status") == "approved" and migration_result.get("changed"):
+        if validation_evidence.get("status") == "approved":
             return {
                 "agent": self.name,
                 "step_id": step_id,
                 "verdict": "accepted",
                 "rationale": (
-                    "The step changed the planned files, tests passed, no out-of-scope "
-                    "changes were detected, and no source-library usage remains in the "
-                    "migrated file."
+                    "Tests passed, no out-of-scope changes were detected, no "
+                    "source-library usage remains in the migrated scope, and no "
+                    "public symbols were dropped."
                 ),
                 "feedback_target": "none",
                 "feedback_for_agent": "",
@@ -273,41 +344,24 @@ class ValidationAgent:
                 "confidence": "high",
             }
 
-        if validation_evidence.get("status") == "rejected":
-            feedback = {
-                **validation_evidence,
-                "actionable_feedback": _actionable_validation_feedback(
-                    validation_evidence
-                ),
-            }
-            return {
-                "agent": self.name,
-                "step_id": step_id,
-                "verdict": "rejected_implementation",
-                "rationale": (
-                    "The step failed validation evidence: tests, scope, or remaining "
-                    "source-library usage did not satisfy the migration contract."
-                ),
-                "feedback_target": "agent_2",
-                "feedback_for_agent": json.dumps(feedback, sort_keys=True),
-                "retry_recommendation": "retry",
-                "confidence": "high",
-            }
-
-        return None
-
-    def _get_chain(self):
-        if self._chain is None:
-            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(encoding="utf-8")
-            llm = get_llm().with_structured_output(ValidationVerdict)
-            self._chain = (
-                ChatPromptTemplate.from_messages([
-                    SystemMessage(content=system_prompt),
-                    ("human", _HUMAN_TEMPLATE),
-                ])
-                | llm
-            )
-        return self._chain
+        feedback = {
+            **validation_evidence,
+            "actionable_feedback": _actionable_validation_feedback(validation_evidence),
+        }
+        return {
+            "agent": self.name,
+            "step_id": step_id,
+            "verdict": "rejected_implementation",
+            "rationale": (
+                "The step failed validation evidence: tests, scope, remaining "
+                "source-library usage, or a dropped public symbol did not satisfy "
+                "the migration contract."
+            ),
+            "feedback_target": "agent_2",
+            "feedback_for_agent": json.dumps(feedback, sort_keys=True),
+            "retry_recommendation": "retry",
+            "confidence": "high",
+        }
 
 
 def _ast_library_aliases(tree: ast.Module, source_library: str) -> set[str]:
@@ -425,11 +479,42 @@ def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
     return "\n".join(selected)
 
 
+def _missing_top_level_symbols(original_code: str, migrated_code: str) -> list[str]:
+    return sorted(
+        _top_level_public_symbols(original_code) - _top_level_public_symbols(migrated_code)
+    )
+
+
+def _top_level_public_symbols(source: str) -> set[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and not node.name.startswith("_")
+    }
+
+
 def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
+    missing_symbols = validation_evidence.get("missing_public_symbols") or []
     pytest_feedback = validation_evidence.get("pytest_feedback", "")
     if not pytest_feedback:
+        if missing_symbols:
+            return (
+                "Restore every missing top-level public function/class from the "
+                "original file and migrate its implementation instead of deleting "
+                f"or renaming it. Missing symbols: {', '.join(missing_symbols)}."
+            )
         return "Review validation evidence and revise the implementation."
     hints = []
+    if missing_symbols:
+        hints.append(
+            "Restore the missing top-level public symbols and migrate their bodies "
+            f"instead of dropping them: {', '.join(missing_symbols)}."
+        )
     has_assertion_index_diff = "At index" in pytest_feedback and " diff" in pytest_feedback
     has_list_like_diff = "[" in pytest_feedback and "]" in pytest_feedback
     if "does not support `Series` assignment by index" in pytest_feedback:
