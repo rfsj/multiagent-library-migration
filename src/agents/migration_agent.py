@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -50,6 +51,105 @@ Return ONLY the complete migrated file, preserving all untouched code outside th
 """
 
 
+# Fixed few-shot examples prepended to the prompt when `use_few_shot` is on.
+# These target the patterns the model fails on most systematically (column
+# mutation, dependent columns, groupby().transform, apply(axis=1)) — see
+# ai_docs/improvements.md #11. They use placeholder column names (a/b/c,
+# value/category) on purpose: the goal is to anchor the *transformation shape*
+# and the structured-output format, NOT to encode a benchmark-specific answer
+# key (that would reintroduce the overfitting v4/v5 were built to avoid).
+_FEW_SHOT_PAIRS: list[tuple[str, dict[str, Any]]] = [
+    (
+        "Migrate the following file from pandas to polars.\n"
+        "## Source code\n```python\n"
+        "import pandas as pd\n\n\n"
+        "def enrich(df):\n"
+        '    df["base"] = df["a"] * df["b"]\n'
+        '    df["score"] = df["base"] + df["c"]\n'
+        "    return df\n"
+        "```",
+        {
+            "migration_plan": (
+                "df[col]=rhs is in-place mutation (missing in polars) -> with_columns. "
+                "'score' reads 'base' created just above (staged-expression visibility) "
+                "-> split into two sequential with_columns calls."
+            ),
+            "migrated_code": (
+                "import polars as pl\n\n\n"
+                "def enrich(df):\n"
+                '    df = df.with_columns((pl.col("a") * pl.col("b")).alias("base"))\n'
+                '    df = df.with_columns((pl.col("base") + pl.col("c")).alias("score"))\n'
+                "    return df\n"
+            ),
+            "migrated_requirements": None,
+            "changes_summary": (
+                "Replaced two df[col]=rhs assignments with sequential with_columns calls "
+                "so the dependent 'score' column sees the materialized 'base' column."
+            ),
+            "unmigrated_patterns": [],
+        },
+    ),
+    (
+        "Migrate the following file from pandas to polars.\n"
+        "## Source code\n```python\n"
+        "import pandas as pd\n\n\n"
+        "def features(df):\n"
+        '    df["grp_mean"] = df.groupby("category")["value"].transform("mean")\n'
+        '    df["flag"] = df.apply(\n'
+        '        lambda r: "hi" if r["value"] > r["grp_mean"] else "lo", axis=1\n'
+        "    )\n"
+        "    return df\n"
+        "```",
+        {
+            "migration_plan": (
+                "groupby().transform('mean') broadcasts a group aggregate back to every "
+                "row -> mean().over('category'). apply(axis=1) is a row-wise conditional "
+                "-> when/then/otherwise. 'flag' depends on 'grp_mean' -> sequential calls."
+            ),
+            "migrated_code": (
+                "import polars as pl\n\n\n"
+                "def features(df):\n"
+                '    df = df.with_columns(pl.col("value").mean().over("category").alias("grp_mean"))\n'
+                "    df = df.with_columns(\n"
+                '        pl.when(pl.col("value") > pl.col("grp_mean"))\n'
+                '        .then(pl.lit("hi"))\n'
+                '        .otherwise(pl.lit("lo"))\n'
+                '        .alias("flag")\n'
+                "    )\n"
+                "    return df\n"
+            ),
+            "migrated_requirements": None,
+            "changes_summary": (
+                "Rewrote groupby().transform as a window expression with over(), and the "
+                "row-wise apply(axis=1) as a when/then/otherwise expression."
+            ),
+            "unmigrated_patterns": [],
+        },
+    ),
+]
+
+
+def _few_shot_messages(include_plan: bool = True) -> list[Any]:
+    """Build alternating Human/AI demonstration messages for the prompt.
+
+    Returned as concrete message instances (not ("human", str) tuples) so the
+    braces in the example code are passed literally and never parsed as
+    ChatPromptTemplate variables.
+
+    When ``include_plan`` is False the demonstrated AI responses omit the
+    ``migration_plan`` field, so the few-shot examples do not implicitly teach
+    chain-of-thought. This keeps the "few-shot without CoT" ablation clean.
+    """
+    messages: list[Any] = []
+    for human_text, ai_result in _FEW_SHOT_PAIRS:
+        result = dict(ai_result)
+        if not include_plan:
+            result.pop("migration_plan", None)
+        messages.append(HumanMessage(content=human_text))
+        messages.append(AIMessage(content=json.dumps(result)))
+    return messages
+
+
 class UnmigratedPattern(BaseModel):
     line: int = Field(default=0, description="Line number in the original file.")
     api_call: str = Field(default="", description="Source-library API call that could not be migrated.")
@@ -73,23 +173,48 @@ class MigrationResult(BaseModel):
     )
 
 
+class MigrationResultCoT(MigrationResult):
+    """Schema bound when use_cot is on. `migration_plan` is REQUIRED here (no
+    default) so the model's structured output is forced to emit it. With a
+    default, Gemini's function-calling silently drops the field — making CoT
+    unreliable — so the toggle swaps the bound schema instead of relying on a
+    prompt instruction."""
+
+    migration_plan: str = Field(
+        description=(
+            "Step-by-step reasoning produced for the code: invariants to preserve, scope, "
+            "data flow, per-call mapping decisions, and risk-class flags. Required."
+        ),
+    )
+
+
 class MigrationAgent:
     """LLM-powered agent that executes one planned migration step at a time."""
 
     name = "migration_agent"
 
     def __init__(self, config: MigrationConfig | None = None) -> None:
-        system_prompt = (_PROMPTS_DIR / "migration_agent_v2.md").read_text(encoding="utf-8")
-        llm = get_llm().with_structured_output(MigrationResult)
-        self._chain = (
-            ChatPromptTemplate.from_messages([
-                SystemMessage(content=system_prompt),
-                ("human", _HUMAN_TEMPLATE),
-            ])
-            | llm
-        )
         self._config = config or MigrationConfig.from_env()
+        # CoT lives in the prompt body (appending an instruction does not make
+        # flash-lite fill migration_plan). So use_cot selects the base prompt:
+        # v5 carries the CoT apparatus, v4 is its CoT-free twin. An explicit
+        # MIGRATION_PROMPT_FILE still wins for ad-hoc overrides.
+        prompt_file = os.getenv("MIGRATION_PROMPT_FILE") or (
+            "migration_agent_v5.md" if self._config.use_cot else "migration_agent_v4.md"
+        )
+        system_prompt = (_PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
+        # CoT on -> bind the schema where migration_plan is REQUIRED, forcing the
+        # model to emit it. CoT off -> base schema has no migration_plan at all.
+        result_schema = MigrationResultCoT if self._config.use_cot else MigrationResult
+        llm = get_llm().with_structured_output(result_schema)
+        messages: list[Any] = [SystemMessage(content=system_prompt)]
+        if self._config.use_few_shot:
+            messages.extend(_few_shot_messages(include_plan=self._config.use_cot))
+        messages.append(("human", _HUMAN_TEMPLATE))
+        self._chain = ChatPromptTemplate.from_messages(messages) | llm
         self._current_unmigrated_patterns: list[dict[str, Any]] = []
+        self._last_migration_plan: str = ""
+        self._current_migration_plans: list[dict[str, Any]] = []
 
     @property
     def _cfg(self) -> MigrationConfig:
@@ -251,13 +376,17 @@ class MigrationAgent:
             return source, 0, "", _empty_pipeline()
 
         allowed_symbols = step.get("allowed_symbols", [])
+        self._last_migration_plan = ""
+        self._current_migration_plans = []
         migrated, total_attempts, last_error = self._invoke_migration_chain(
             rel_file, source, step, retry_feedback
         )
         # Capture the unaided first-pass output before any post-processing so the
         # raw LLM signal can be measured even on assisted runs (see
-        # ai_docs/proposal-research-mode.md).
+        # ai_docs/proposal-research-mode.md). The migration_plan is the model's
+        # first-pass chain-of-thought, captured here before regen/rescan overwrite it.
         raw_llm_code = migrated
+        migration_plan = getattr(self, "_last_migration_plan", "")
         layers_active: list[str] = []
         cfg = self._cfg
 
@@ -298,6 +427,8 @@ class MigrationAgent:
             migrated = ast_result.code
 
         pipeline = {
+            "migration_plan": migration_plan,
+            "migration_plans": list(getattr(self, "_current_migration_plans", [])),
             "raw_llm_code": raw_llm_code,
             "final_code": migrated,
             "raw_equals_final": raw_llm_code == migrated,
@@ -328,6 +459,7 @@ class MigrationAgent:
                     f"file. Syntax feedback: {syntax_error}"
                 )
             },
+            phase="syntax_regen",
         )
         if allowed_symbols:
             regenerated = self._apply_allowed_symbol_scope(
@@ -341,6 +473,7 @@ class MigrationAgent:
         source: str,
         step: dict[str, Any],
         retry_feedback: dict[str, Any] | str | None,
+        phase: str = "initial",
     ) -> tuple[str, int, str]:
         allowed_symbols = step.get("allowed_symbols", [])
         allowed_symbols_str = ", ".join(allowed_symbols) if allowed_symbols else "(all code in file)"
@@ -369,6 +502,11 @@ class MigrationAgent:
             result: MigrationResult | None = self._chain.invoke(prompt_payload)
             migrated_code = getattr(result, "migrated_code", None)
             if isinstance(migrated_code, str):
+                plan = getattr(result, "migration_plan", "") or ""
+                self._last_migration_plan = plan
+                self._current_migration_plans.append(
+                    {"phase": phase, "attempt": attempt, "migration_plan": plan}
+                )
                 patterns = getattr(result, "unmigrated_patterns", None)
                 if patterns:
                     self._current_unmigrated_patterns = [
@@ -466,7 +604,7 @@ class MigrationAgent:
             )
         }
         revised, attempts, error = self._invoke_migration_chain(
-            rel_file, source, step, feedback
+            rel_file, source, step, feedback, phase="rescan"
         )
         if allowed_symbols:
             revised = self._apply_allowed_symbol_scope(source, revised, allowed_symbols)
