@@ -128,6 +128,10 @@ class PlannerV3Step(BaseModel):
         default_factory=list,
         description="Grouped files, empty for normal single-file steps.",
     )
+    risk_level: str = Field(default="low", description="low, medium, or high.")
+    risk_factors: list[str] = Field(default_factory=list)
+    requires_human_review: bool = Field(default=False)
+    human_review_reasons: list[str] = Field(default_factory=list)
     status: str = Field(default="planned", description="Always planned.")
 
 
@@ -264,6 +268,11 @@ class PlannerV3Agent:
             "dataframe_flow_analysis": {"symbols": [], "groups": [], "notes": []},
             "planner_warnings": warnings,
             "migration_steps": migration_steps,
+            "human_review_required": any(
+                step.get("requires_human_review", False)
+                for step in migration_steps
+            ),
+            "human_review_reasons": _human_review_reasons(migration_steps),
         }
 
         log_name = (
@@ -458,6 +467,16 @@ class PlannerV3Agent:
                 payload["file"],
             )
             payload["files"] = grouped_files
+            payload["risk_level"] = _valid_risk_level(payload.get("risk_level"))
+            payload["risk_factors"] = payload.get("risk_factors", [])
+            payload["requires_human_review"] = bool(
+                payload.get("requires_human_review", False)
+            )
+            payload["human_review_reasons"] = payload.get(
+                "human_review_reasons",
+                [],
+            )
+            _apply_human_review_policy(payload)
             payload.setdefault("step_type", "single_file")
             scoped_steps.extend(
                 _least_scope_steps(
@@ -558,6 +577,39 @@ def _sanitize_complexity(
         level = complexity.get(rel_file, "medium")
         sanitized[rel_file] = level if level in valid_levels else "medium"
     return sanitized
+
+
+def _valid_risk_level(level: str | None) -> str:
+    return level if level in {"low", "medium", "high"} else "medium"
+
+
+def _apply_human_review_policy(step: dict[str, Any]) -> None:
+    reasons = [
+        reason
+        for reason in step.get("human_review_reasons", [])
+        if isinstance(reason, str) and reason.strip()
+    ]
+    if step.get("risk_level") == "high":
+        step["requires_human_review"] = True
+        if not reasons:
+            reasons.append("Step risk_level is high.")
+    elif step.get("requires_human_review") and not reasons:
+        reasons.append("Planner marked this step for human review.")
+    step["human_review_reasons"] = reasons
+
+
+def _human_review_reasons(steps: list[dict[str, Any]]) -> list[str]:
+    reasons: list[str] = []
+    for step in steps:
+        if not step.get("requires_human_review"):
+            continue
+        step_id = step.get("step_id", "unknown_step")
+        rel_file = step.get("file", "unknown_file")
+        for reason in step.get("human_review_reasons", []):
+            message = f"{step_id} ({rel_file}): {reason}"
+            if message not in reasons:
+                reasons.append(message)
+    return reasons
 
 
 def _sanitize_step_files(

@@ -75,6 +75,14 @@ Classify each affected file:
 - `high`: ambiguous semantics, cross-file type contracts, index-dependent
   behavior, unsupported APIs, or weak evidence.
 
+### Human Review
+
+Use step-level `risk_level`, `risk_factors`, `requires_human_review`, and
+`human_review_reasons` to flag plans that should be inspected before trusting
+the migration. Mark `requires_human_review: true` when a step has high risk,
+ambiguous behavior, weak evidence, unsupported APIs, index-sensitive semantics,
+or cross-file type contracts that are not clearly safe.
+
 ## Replanning
 
 If replanning feedback is present, revise the plan shape instead of repeating
