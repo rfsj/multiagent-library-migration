@@ -387,6 +387,22 @@ class PlannerV3Agent:
                 )
                 continue
 
+            if _is_test_file_path(rel_file):
+                _record_guardrail(
+                    guardrail_events,
+                    warnings,
+                    rule="test_file_target",
+                    severity="error",
+                    action="drop_step",
+                    message=(
+                        f"Dropped step {step_id} for {rel_file}: test files are "
+                        "not migration targets."
+                    ),
+                    step_id=step_id,
+                    file=rel_file,
+                )
+                continue
+
             if rel_file not in step_targets:
                 _record_guardrail(
                     guardrail_events,
@@ -557,7 +573,11 @@ def _sanitize_step_files(
     kept: list[str] = []
     removed: list[str] = []
     for rel_path in files:
-        if not _is_safe_relative_path(rel_path) or rel_path not in allowed_targets:
+        if (
+            not _is_safe_relative_path(rel_path)
+            or _is_test_file_path(rel_path)
+            or rel_path not in allowed_targets
+        ):
             removed.append(rel_path)
             continue
         if rel_path not in kept:
@@ -611,6 +631,14 @@ def _is_safe_relative_path(rel_path: str) -> bool:
         return False
     parts = Path(rel_path).parts
     return ".." not in parts
+
+
+def _is_test_file_path(rel_path: str) -> bool:
+    path = Path(rel_path)
+    if any(part in {"tests", "test", "testing"} for part in path.parts[:-1]):
+        return True
+    basename = path.name
+    return basename.startswith("test_") or basename.endswith("_test.py")
 
 
 def _least_scope_steps(
