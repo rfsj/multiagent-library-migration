@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,13 @@ class PlannerV3SymbolAnalysis(BaseModel):
     methods: list[str] = Field(default_factory=list)
     column_or_index_access: bool = Field(default=False)
     local_calls: list[str] = Field(default_factory=list)
+    consumes_dataframe_from: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Names of top-level functions/classes — in this file or another "
+            "analyzed file — that this symbol receives DataFrame-like input from."
+        ),
+    )
     confidence: str = Field(default="medium", description="low, medium, or high.")
     evidence: list[str] = Field(default_factory=list)
 
@@ -215,6 +223,7 @@ class PlannerV3Agent:
             replan_attempt=replan_attempt,
         )
         symbol_analysis_payload = symbol_analysis.model_dump()
+        dataframe_flow_analysis = _build_dataframe_flow_analysis(symbol_analysis_payload)
 
         result: PlannerV3Plan = self._chain.invoke({
             "source_library": source_library,
@@ -243,6 +252,7 @@ class PlannerV3Agent:
             audit["dependency_summary"],
             project_dir,
             symbol_analysis_payload,
+            dataframe_flow_analysis,
         )
         self._write_guardrail_log(logs_dir, guardrail_events, replan_attempt)
 
@@ -265,7 +275,7 @@ class PlannerV3Agent:
             ),
             "complexity": _sanitize_complexity(result.complexity, affected_source_files),
             "symbol_analysis": symbol_analysis_payload,
-            "dataframe_flow_analysis": {"symbols": [], "groups": [], "notes": []},
+            "dataframe_flow_analysis": dataframe_flow_analysis,
             "planner_warnings": warnings,
             "migration_steps": migration_steps,
             "human_review_required": any(
@@ -361,6 +371,7 @@ class PlannerV3Agent:
         dependency_summary: dict[str, Any],
         project_dir: Path,
         symbol_analysis: dict[str, Any],
+        dataframe_flow_analysis: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[str], list[PlannerGuardrailEvent]]:
         affected_targets = set(affected_source_files)
         dependency_targets = set(dependency_files)
@@ -483,9 +494,17 @@ class PlannerV3Agent:
                     project_dir,
                     payload,
                     symbol_analysis,
+                    dataframe_flow_analysis,
                     warnings,
                 )
             )
+
+        scoped_steps = _apply_flow_grouping(
+            scoped_steps,
+            dataframe_flow_analysis,
+            guardrail_events,
+            warnings,
+        )
 
         normalized = _deduplicate_steps(scoped_steps, warnings)
         for index, payload in enumerate(normalized, start=1):
@@ -693,16 +712,276 @@ def _is_test_file_path(rel_path: str) -> bool:
     return basename.startswith("test_") or basename.endswith("_test.py")
 
 
+def _build_dataframe_flow_analysis(symbol_analysis: dict[str, Any]) -> dict[str, Any]:
+    """Derive ``dataframe_flow_analysis`` deterministically from symbol analysis.
+
+    No extra LLM call: reuses the producer/consumer evidence already collected
+    in the symbol-analysis phase (creates/returns/receives DataFrame-like plus
+    ``consumes_dataframe_from``) to compute cross-file groups that must be
+    planned together. This is read by ``MigrationAgent``'s upstream-failed-file
+    check (``src/graph/migration_flow.py``) and by the post-validation semantic
+    probe (``src/evaluation/semantic_probe.py``), so it must be populated even
+    when the resulting plan is mostly single-file steps.
+    """
+    files = symbol_analysis.get("files", [])
+    symbol_to_file: dict[str, str] = {}
+    for file_analysis in files:
+        rel_file = file_analysis.get("file", "")
+        for symbol in file_analysis.get("symbols", []):
+            name = symbol.get("name")
+            if name and name not in symbol_to_file:
+                symbol_to_file[name] = rel_file
+
+    flow_symbols: list[dict[str, Any]] = []
+    file_deps: dict[str, set[str]] = {}
+    for file_analysis in files:
+        rel_file = file_analysis.get("file", "")
+        for symbol in file_analysis.get("symbols", []):
+            name = symbol.get("name", "")
+            consumes_from = [
+                dep
+                for dep in symbol.get("consumes_dataframe_from", [])
+                if dep in symbol_to_file
+            ]
+            flow_symbols.append({
+                "file": rel_file,
+                "symbol": name,
+                "role": _flow_role(symbol),
+                "returns_dataframe": bool(symbol.get("returns_dataframe_like")),
+                "consumes_dataframe_from": consumes_from,
+                "type_contract": "unknown",
+            })
+            for dep in consumes_from:
+                producer_file = symbol_to_file.get(dep)
+                if producer_file and producer_file != rel_file:
+                    file_deps.setdefault(rel_file, set()).add(producer_file)
+
+    return {
+        "symbols": flow_symbols,
+        "groups": _build_flow_groups(flow_symbols, file_deps),
+        "notes": symbol_analysis.get("notes", []),
+    }
+
+
+def _flow_role(symbol: dict[str, Any]) -> str:
+    produces = bool(symbol.get("creates_dataframe_like") or symbol.get("returns_dataframe_like"))
+    consumes = bool(symbol.get("receives_dataframe_like"))
+    if produces and consumes:
+        return "transformer"
+    if produces:
+        return "producer"
+    if consumes:
+        return "consumer"
+    return "unknown"
+
+
+def _build_flow_groups(
+    flow_symbols: list[dict[str, Any]],
+    file_deps: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """Union consumer files with their cross-file producer files into groups."""
+    if not file_deps:
+        return []
+
+    parent: dict[str, str] = {}
+
+    def find(node: str) -> str:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            node = parent[node]
+        return node
+
+    def union(a: str, b: str) -> None:
+        root_a, root_b = find(a), find(b)
+        if root_a != root_b:
+            parent[root_a] = root_b
+
+    for consumer, producers in file_deps.items():
+        for producer in producers:
+            union(consumer, producer)
+
+    clusters: dict[str, set[str]] = {}
+    for node in parent:
+        clusters.setdefault(find(node), set()).add(node)
+
+    groups = []
+    sorted_clusters = sorted(
+        (sorted(members) for members in clusters.values() if len(members) > 1),
+        key=lambda members: members[0],
+    )
+    for index, files in enumerate(sorted_clusters, start=1):
+        file_set = set(files)
+        symbols_in_group = sorted({
+            entry["symbol"]
+            for entry in flow_symbols
+            if entry["file"] in file_set and entry["role"] != "unknown" and entry["symbol"]
+        })
+        groups.append({
+            "group_id": f"flow_group_{index:03d}",
+            "files": files,
+            "symbols": symbols_in_group,
+            "reason": (
+                "Symbol analysis found DataFrame-like values produced in one "
+                "of these files and consumed in another."
+            ),
+            "planning_strategy": "grouped_before_consumers",
+        })
+    return groups
+
+
+def _file_level_flow_files(dataframe_flow_analysis: dict[str, Any]) -> set[str]:
+    files: set[str] = set()
+    for group in dataframe_flow_analysis.get("groups", []):
+        group_files = [file for file in group.get("files", []) if isinstance(file, str)]
+        if len(group_files) > 1:
+            files.update(group_files)
+    return files
+
+
+def _apply_flow_grouping(
+    steps: list[dict[str, Any]],
+    dataframe_flow_analysis: dict[str, Any],
+    guardrail_events: list[PlannerGuardrailEvent],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    """Merge separate per-file steps that DataFrame flow analysis marked as coupled.
+
+    Mirrors the per-step guard in ``_least_scope_steps`` (which keeps a coupled
+    file from being split into symbol-level steps) by also keeping coupled
+    *files* from being migrated as independent, unordered steps.
+    """
+    grouped_file_sets = [
+        group["files"]
+        for group in dataframe_flow_analysis.get("groups", [])
+        if group.get("planning_strategy") == "grouped_before_consumers"
+        and len(group.get("files", [])) > 1
+    ]
+    if not grouped_file_sets:
+        return steps
+
+    step_by_file: dict[str, dict[str, Any]] = {}
+    for step in steps:
+        for rel_file in step.get("files") or [step["file"]]:
+            step_by_file.setdefault(rel_file, step)
+
+    used_steps: set[int] = set()
+    merged_steps: list[dict[str, Any]] = []
+    for files in grouped_file_sets:
+        present = [file for file in files if file in step_by_file]
+        unique_steps = {id(step_by_file[file]) for file in present}
+        if len(unique_steps) <= 1:
+            continue  # already a single step covering the whole group
+
+        ordered_files = _file_dependency_order(present, dataframe_flow_analysis)
+        primary = dict(step_by_file[ordered_files[0]])
+        allowed_files: list[str] = []
+        for rel_file in ordered_files:
+            step = step_by_file[rel_file]
+            used_steps.add(id(step))
+            for allowed in step.get("allowed_files", []):
+                if allowed not in allowed_files:
+                    allowed_files.append(allowed)
+            if rel_file not in allowed_files:
+                allowed_files.append(rel_file)
+
+        primary["file"] = ordered_files[0]
+        primary["files"] = ordered_files
+        primary["allowed_files"] = allowed_files
+        primary["allowed_symbols"] = []
+        primary["step_type"] = "grouped"
+        primary["description"] = (
+            f"Migrate coupled DataFrame flow ({len(ordered_files)} files atomically)."
+        )
+        merged_steps.append(primary)
+        _record_guardrail(
+            guardrail_events,
+            warnings,
+            rule="dataframe_flow_grouping",
+            severity="info",
+            action="group_steps",
+            message=(
+                "Grouped DataFrame flow files into one atomic migration step: "
+                + ", ".join(ordered_files)
+            ),
+            step_id=primary.get("step_id"),
+            file=ordered_files[0],
+        )
+
+    if not merged_steps:
+        return steps
+
+    remaining = [step for step in steps if id(step) not in used_steps]
+    return merged_steps + remaining
+
+
+def _file_dependency_order(
+    files: list[str],
+    dataframe_flow_analysis: dict[str, Any],
+) -> list[str]:
+    """Return *files* in topological order by cross-file producer-consumer links.
+
+    Falls back to the original order on cycles or when no cross-file edges
+    exist between the given files.
+    """
+    file_set = set(files)
+    symbols = dataframe_flow_analysis.get("symbols", [])
+    symbol_to_file: dict[str, str] = {
+        s["symbol"]: s["file"]
+        for s in symbols
+        if s.get("symbol") and s.get("file") in file_set
+    }
+
+    file_deps: dict[str, set[str]] = {file: set() for file in files}
+    for sym in symbols:
+        consumer_file = sym.get("file")
+        if consumer_file not in file_set:
+            continue
+        for producer_symbol in sym.get("consumes_dataframe_from", []):
+            producer_file = symbol_to_file.get(producer_symbol)
+            if producer_file and producer_file != consumer_file:
+                file_deps[consumer_file].add(producer_file)
+
+    if not any(file_deps.values()):
+        return files
+
+    in_degree = {file: len(file_deps[file]) for file in files}
+    reverse: dict[str, set[str]] = {file: set() for file in files}
+    for consumer, producers in file_deps.items():
+        for producer in producers:
+            if producer in reverse:
+                reverse[producer].add(consumer)
+
+    queue: deque[str] = deque(file for file in files if in_degree[file] == 0)
+    result: list[str] = []
+    while queue:
+        file = queue.popleft()
+        result.append(file)
+        for consumer in sorted(reverse.get(file, set())):
+            in_degree[consumer] -= 1
+            if in_degree[consumer] == 0:
+                queue.append(consumer)
+
+    return result if len(result) == len(files) else files
+
+
 def _least_scope_steps(
     project_dir: Path,
     step: dict[str, Any],
     symbol_analysis: dict[str, Any],
+    dataframe_flow_analysis: dict[str, Any],
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     if step.get("files") or step.get("allowed_symbols"):
         return [step]
     rel_file = step["file"]
     if not rel_file.endswith(".py"):
+        return [step]
+
+    if rel_file in _file_level_flow_files(dataframe_flow_analysis):
+        warnings.append(
+            f"Kept {rel_file} as one file-level step because DataFrame flow "
+            "analysis marked it as coupled with other migration targets."
+        )
         return [step]
 
     path = project_dir / rel_file
