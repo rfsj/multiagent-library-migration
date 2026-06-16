@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,13 @@ from src.tools.project_scanner import build_project_audit, scan_project
 load_dotenv()
 
 _PROMPTS_DIR = Path(__file__).parents[2] / "prompts"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 _HUMAN_TEMPLATE = """\
 Analyze the project below and produce a migration plan from \
@@ -247,6 +255,13 @@ class PlannerV3Agent:
         file_contents: str,
         replan_attempt: int,
     ) -> PlannerV3SymbolAnalysisResult:
+        if not _env_flag("PLANNER_USE_SYMBOL_ANALYSIS", True):
+            result = PlannerV3SymbolAnalysisResult(
+                notes=["Symbol analysis disabled by PLANNER_USE_SYMBOL_ANALYSIS=0."]
+            )
+            self._write_symbol_analysis_log(logs_dir, result, replan_attempt)
+            return result
+
         result: PlannerV3SymbolAnalysisResult | None = self._symbol_analysis_chain.invoke({
             "source_library": source_library,
             "target_library": target_library,
@@ -256,6 +271,15 @@ class PlannerV3Agent:
             result = PlannerV3SymbolAnalysisResult(
                 notes=["Symbol analysis returned no structured output."]
             )
+        self._write_symbol_analysis_log(logs_dir, result, replan_attempt)
+        return result
+
+    def _write_symbol_analysis_log(
+        self,
+        logs_dir: Path,
+        result: PlannerV3SymbolAnalysisResult,
+        replan_attempt: int,
+    ) -> None:
         log_name = (
             "planner_symbol_analysis.json"
             if replan_attempt == 0
@@ -265,7 +289,6 @@ class PlannerV3Agent:
             json.dumps(result.model_dump(), indent=2),
             encoding="utf-8",
         )
-        return result
 
     def _collect_file_contents(self, project_dir: Path, affected_files: list[str]) -> str:
         if not affected_files:
