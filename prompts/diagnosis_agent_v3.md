@@ -28,10 +28,16 @@ You receive:
 - dependency files found by static scanning;
 - test files found by static scanning;
 - affected production files;
+- structured symbol analysis produced by the planner analysis phase;
 - optional replanning feedback from a previous failed plan.
 
 Use only the information provided. If a relationship is uncertain, record the
 uncertainty in descriptions or complexity; do not invent repo-specific rules.
+
+The structured symbol analysis is planning evidence. Use it to understand which
+top-level symbols explicitly use the source library, which symbols appear to use
+DataFrame-like objects, and which symbols call each other. It is not a migration
+plan and should not override the scope rules below.
 
 ## Planning Rules
 
@@ -46,13 +52,14 @@ uncertainty in descriptions or complexity; do not invent repo-specific rules.
 
 ### Step Size
 
-Prefer one step per affected production file.
+Prefer the smallest step that can still be validated safely.
 
-Use `allowed_symbols` only when a file has multiple clearly independent
-functions/classes that can be migrated separately without mixing incompatible
-DataFrame types.
+Use `allowed_symbols` when a file has multiple clearly independent
+functions/classes that can be migrated separately.
 
 Leave `allowed_symbols` empty when the whole file should be migrated together.
+Examples: shared helpers, local call chains between affected symbols, shared
+class state, or unclear type contracts.
 
 Use `files` only when multiple files must be migrated atomically in the same
 validation unit. Do not group files just because they are both affected.

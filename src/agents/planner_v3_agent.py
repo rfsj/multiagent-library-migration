@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 from typing import Any
@@ -29,8 +30,54 @@ Analyze the project below and produce a migration plan from \
 - Test files: {test_files}
 - Affected files: {affected_files}
 
+## Structured symbol analysis
+
+{symbol_analysis}
+
 {replan_context}
 """
+
+_SYMBOL_ANALYSIS_TEMPLATE = """\
+Analyze the Python source files below before migration planning.
+
+## Source library
+
+{source_library}
+
+## Target library
+
+{target_library}
+
+## Source files
+
+{file_contents}
+"""
+
+
+class PlannerV3SymbolAnalysis(BaseModel):
+    name: str = Field(description="Top-level function or class name.")
+    kind: str = Field(description="function, async_function, class, or unknown.")
+    explicit_source_usage: bool = Field(default=False)
+    dataframe_like_usage: bool = Field(default=False)
+    creates_dataframe_like: bool = Field(default=False)
+    receives_dataframe_like: bool = Field(default=False)
+    returns_dataframe_like: bool = Field(default=False)
+    methods: list[str] = Field(default_factory=list)
+    column_or_index_access: bool = Field(default=False)
+    local_calls: list[str] = Field(default_factory=list)
+    confidence: str = Field(default="medium", description="low, medium, or high.")
+    evidence: list[str] = Field(default_factory=list)
+
+
+class PlannerV3FileAnalysis(BaseModel):
+    file: str = Field(description="Relative file path.")
+    symbols: list[PlannerV3SymbolAnalysis] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class PlannerV3SymbolAnalysisResult(BaseModel):
+    files: list[PlannerV3FileAnalysis] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class PlannerV3Step(BaseModel):
@@ -75,13 +122,25 @@ class PlannerV3Agent:
         system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v3.md").read_text(
             encoding="utf-8"
         )
-        llm = get_llm().with_structured_output(PlannerV3Plan)
+        analysis_prompt = (_PROMPTS_DIR / "planner_v3_symbol_analysis.md").read_text(
+            encoding="utf-8"
+        )
+        raw_llm = get_llm()
+        llm = raw_llm.with_structured_output(PlannerV3Plan)
+        analysis_llm = raw_llm.with_structured_output(PlannerV3SymbolAnalysisResult)
         self._chain = (
             ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
                 ("human", _HUMAN_TEMPLATE),
             ])
             | llm
+        )
+        self._symbol_analysis_chain = (
+            ChatPromptTemplate.from_messages([
+                ("system", analysis_prompt),
+                ("human", _SYMBOL_ANALYSIS_TEMPLATE),
+            ])
+            | analysis_llm
         )
 
     def run(
@@ -108,13 +167,28 @@ class PlannerV3Agent:
             encoding="utf-8",
         )
 
+        file_contents = self._collect_file_contents(project_dir, affected_source_files)
+        symbol_analysis = self._analyze_symbols(
+            logs_dir=logs_dir,
+            source_library=source_library,
+            target_library=target_library,
+            file_contents=file_contents,
+            replan_attempt=replan_attempt,
+        )
+        symbol_analysis_payload = symbol_analysis.model_dump()
+
         result: PlannerV3Plan = self._chain.invoke({
             "source_library": source_library,
             "target_library": target_library,
-            "file_contents": self._collect_file_contents(project_dir, affected_source_files),
+            "file_contents": file_contents,
             "dependency_files": scan["dependency_files"],
             "test_files": scan["test_files"],
             "affected_files": affected_source_files,
+            "symbol_analysis": json.dumps(
+                symbol_analysis_payload,
+                indent=2,
+                sort_keys=True,
+            ),
             "replan_context": self._build_replan_context(
                 replan_feedback,
                 replan_attempt,
@@ -128,6 +202,8 @@ class PlannerV3Agent:
             affected_source_files,
             scan["dependency_files"],
             audit["dependency_summary"],
+            project_dir,
+            symbol_analysis_payload,
         )
 
         plan = {
@@ -145,6 +221,7 @@ class PlannerV3Agent:
             ],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
+            "symbol_analysis": symbol_analysis_payload,
             "dataframe_flow_analysis": {"symbols": [], "groups": [], "notes": []},
             "planner_warnings": warnings,
             "migration_steps": migration_steps,
@@ -160,6 +237,35 @@ class PlannerV3Agent:
             encoding="utf-8",
         )
         return plan
+
+    def _analyze_symbols(
+        self,
+        *,
+        logs_dir: Path,
+        source_library: str,
+        target_library: str,
+        file_contents: str,
+        replan_attempt: int,
+    ) -> PlannerV3SymbolAnalysisResult:
+        result: PlannerV3SymbolAnalysisResult | None = self._symbol_analysis_chain.invoke({
+            "source_library": source_library,
+            "target_library": target_library,
+            "file_contents": file_contents,
+        })
+        if result is None:
+            result = PlannerV3SymbolAnalysisResult(
+                notes=["Symbol analysis returned no structured output."]
+            )
+        log_name = (
+            "planner_symbol_analysis.json"
+            if replan_attempt == 0
+            else f"planner_symbol_analysis_replan_{replan_attempt}.json"
+        )
+        (logs_dir / log_name).write_text(
+            json.dumps(result.model_dump(), indent=2),
+            encoding="utf-8",
+        )
+        return result
 
     def _collect_file_contents(self, project_dir: Path, affected_files: list[str]) -> str:
         if not affected_files:
@@ -190,9 +296,11 @@ class PlannerV3Agent:
         affected_source_files: list[str],
         dependency_files: list[str],
         dependency_summary: dict[str, Any],
+        project_dir: Path,
+        symbol_analysis: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[str]]:
         allowed_targets = set(affected_source_files) | set(dependency_files)
-        normalized: list[dict[str, Any]] = []
+        scoped_steps: list[dict[str, Any]] = []
         warnings: list[str] = []
 
         for step in steps:
@@ -210,13 +318,28 @@ class PlannerV3Agent:
             if payload["file"] not in allowed_files:
                 allowed_files.insert(0, payload["file"])
 
-            payload["step_id"] = f"step_{len(normalized) + 1:03d}"
             payload["status"] = "planned"
             payload["allowed_files"] = allowed_files
-            payload["allowed_symbols"] = payload.get("allowed_symbols", [])
+            payload["allowed_symbols"] = _valid_allowed_symbols(
+                project_dir / payload["file"],
+                payload.get("allowed_symbols", []),
+                warnings,
+                payload["file"],
+            )
             payload["files"] = payload.get("files", [])
             payload.setdefault("step_type", "single_file")
-            normalized.append(payload)
+            scoped_steps.extend(
+                _least_scope_steps(
+                    project_dir,
+                    payload,
+                    symbol_analysis,
+                    warnings,
+                )
+            )
+
+        normalized = _deduplicate_steps(scoped_steps, warnings)
+        for index, payload in enumerate(normalized, start=1):
+            payload["step_id"] = f"step_{index:03d}"
 
         if (
             normalized
@@ -231,3 +354,173 @@ class PlannerV3Agent:
             )
 
         return normalized, warnings
+
+
+def _valid_allowed_symbols(
+    path: Path,
+    symbols: list[str],
+    warnings: list[str],
+    rel_file: str,
+) -> list[str]:
+    if not symbols or path.suffix != ".py":
+        return []
+    valid = _top_level_symbols(path)
+    kept = [symbol for symbol in symbols if symbol in valid]
+    removed = sorted(set(symbols) - set(kept))
+    if removed:
+        warnings.append(
+            f"Removed invalid allowed_symbols from {rel_file}: {removed}."
+        )
+    return kept
+
+
+def _least_scope_steps(
+    project_dir: Path,
+    step: dict[str, Any],
+    symbol_analysis: dict[str, Any],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    if step.get("files") or step.get("allowed_symbols"):
+        return [step]
+    rel_file = step["file"]
+    if not rel_file.endswith(".py"):
+        return [step]
+
+    path = project_dir / rel_file
+    symbols = _least_scope_candidate_symbols(path, rel_file, symbol_analysis)
+    if len(symbols) <= 1:
+        return [step]
+    if _has_symbol_dependencies(path, symbols, symbol_analysis, rel_file):
+        warnings.append(
+            f"Kept {rel_file} as one file-level step because affected symbols "
+            "call each other."
+        )
+        return [step]
+
+    split_steps = []
+    for symbol in symbols:
+        scoped = dict(step)
+        scoped["description"] = f"Migrate {symbol} in {rel_file}."
+        scoped["allowed_symbols"] = [symbol]
+        scoped["step_type"] = "single_symbol"
+        split_steps.append(scoped)
+    warnings.append(
+        f"Applied least-scope planning: split {rel_file} into "
+        f"{len(split_steps)} symbol-level steps."
+    )
+    return split_steps
+
+
+def _deduplicate_steps(
+    steps: list[dict[str, Any]],
+    warnings: list[str],
+) -> list[dict[str, Any]]:
+    seen: set[tuple[str, tuple[str, ...], tuple[str, ...]]] = set()
+    result = []
+    for step in steps:
+        key = (
+            step.get("file", ""),
+            tuple(step.get("files", [])),
+            tuple(step.get("allowed_symbols", [])),
+        )
+        if key in seen:
+            warnings.append(
+                f"Dropped duplicate migration step for {step.get('file')} "
+                f"with allowed_symbols {step.get('allowed_symbols', [])}."
+            )
+            continue
+        seen.add(key)
+        result.append(step)
+    return result
+
+
+def _top_level_symbols(path: Path) -> set[str]:
+    tree = _parse_file(path)
+    if tree is None:
+        return set()
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+
+def _least_scope_candidate_symbols(
+    path: Path,
+    rel_file: str,
+    symbol_analysis: dict[str, Any],
+) -> list[str]:
+    valid_symbols = _top_level_symbols(path)
+    file_analysis = _symbol_analysis_for_file(symbol_analysis, rel_file)
+    if not file_analysis:
+        return []
+    candidates = []
+    for symbol in file_analysis.get("symbols", []):
+        name = symbol.get("name")
+        if name not in valid_symbols:
+            continue
+        if symbol.get("confidence") == "low":
+            continue
+        if symbol.get("explicit_source_usage") or symbol.get("dataframe_like_usage"):
+            candidates.append(name)
+    return candidates
+
+
+def _has_symbol_dependencies(
+    path: Path,
+    symbols: list[str],
+    symbol_analysis: dict[str, Any],
+    rel_file: str,
+) -> bool:
+    symbol_set = set(symbols)
+    file_analysis = _symbol_analysis_for_file(symbol_analysis, rel_file)
+    if file_analysis:
+        for symbol in file_analysis.get("symbols", []):
+            name = symbol.get("name")
+            if name not in symbol_set:
+                continue
+            if set(symbol.get("local_calls", [])) & (symbol_set - {name}):
+                return True
+
+    tree = _parse_file(path)
+    if tree is None:
+        return False
+    top_level = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    for symbol_name in symbols:
+        node = top_level.get(symbol_name)
+        if node is not None and _calls_local_symbol(node, symbol_set - {symbol_name}):
+            return True
+    return False
+
+
+def _parse_file(path: Path) -> ast.Module | None:
+    if not path.exists() or path.suffix != ".py":
+        return None
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError:
+        return None
+
+
+def _symbol_analysis_for_file(
+    symbol_analysis: dict[str, Any],
+    rel_file: str,
+) -> dict[str, Any] | None:
+    for file_analysis in symbol_analysis.get("files", []):
+        if file_analysis.get("file") == rel_file:
+            return file_analysis
+    return None
+
+
+def _calls_local_symbol(node: ast.AST, symbols: set[str]) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            if isinstance(child.func, ast.Name) and child.func.id in symbols:
+                return True
+            if isinstance(child.func, ast.Attribute) and child.func.attr in symbols:
+                return True
+    return False
