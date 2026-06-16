@@ -36,6 +36,16 @@ class FakeReviewChain:
         return self.results.pop(0)
 
 
+class FakeTimeoutChain:
+    def __init__(self, exc):
+        self.exc = exc
+        self.calls = []
+
+    def invoke(self, payload):
+        self.calls.append(payload)
+        raise self.exc
+
+
 def rule_based_migrate(source):
     output = source
     output = re.sub(
@@ -233,6 +243,38 @@ def test_migration_agent_records_no_change_when_structured_output_missing(tmp_pa
     assert result["structured_output_attempts"] == 2
     assert "no structured output" in result["structured_output_error"]
     assert log_payload["structured_output_error"] == result["structured_output_error"]
+    assert python_file.read_text(encoding="utf-8") == original
+
+
+def test_migration_agent_records_timeout_as_structured_output_error(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    logs_dir = tmp_path / "logs"
+    source_dir.mkdir(parents=True)
+    python_file = source_dir / "processing.py"
+    original = "import pandas as pd\n"
+    python_file.write_text(original, encoding="utf-8")
+    agent = MigrationAgent.__new__(MigrationAgent)
+    agent._chain = FakeTimeoutChain(TimeoutError("request timed out"))
+
+    result = agent.run_step(
+        project_dir,
+        {
+            "step_id": "step_001",
+            "file": "src/processing.py",
+            "allowed_files": ["src/processing.py"],
+            "source_library": "pandas",
+            "target_library": "polars",
+        },
+        logs_dir,
+    )
+
+    assert result["status"] == "no_change"
+    assert result["structured_output_attempts"] == 1
+    assert (
+        "LLM timeout during migration step step_001"
+        in result["structured_output_error"]
+    )
     assert python_file.read_text(encoding="utf-8") == original
 
 

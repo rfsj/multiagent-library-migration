@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.evaluation.semantic_probe import run_semantic_probe
 
 
@@ -142,3 +143,27 @@ def test_probe_only_reviews_accepted_steps(tmp_path):
 
     assert risks == []
     assert review_agent.calls == []
+
+
+def test_implementation_review_timeout_falls_back(tmp_path, monkeypatch):
+    class TimeoutChain:
+        def invoke(self, payload):
+            raise TimeoutError("request timed out")
+
+    def fake_init(self):
+        self._chain = TimeoutChain()
+
+    monkeypatch.setattr(ImplementationReviewAgent, "__init__", fake_init)
+    agent = ImplementationReviewAgent()
+
+    payload = agent.review(
+        rel_file=Path("src/p.py"),
+        original_code="import pandas as pd\n",
+        migrated_code="import polars as pl\n",
+        planned_step={"step_id": "step_001", "file": "src/p.py"},
+        dataframe_flow_analysis={"symbols": []},
+        logs_dir=tmp_path / "logs",
+    )
+
+    assert payload["status"] == "needs_revision"
+    assert "structured output" in payload["structured_output_error"].lower()

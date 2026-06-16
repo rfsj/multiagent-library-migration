@@ -129,3 +129,15 @@ class LLMProxyLogger(BaseCallbackHandler):
                 "usage": response.llm_output,
             }
         )
+
+    def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
+        self._write(
+            {
+                "event": "error",
+                "ts": datetime.now().isoformat(),
+                "run_id": str(kwargs.get("run_id", "")),
+                "label": _current_label or "unlabeled",
+                "error_type": error.__class__.__name__,
+                "error": str(error),
+            }
+        )

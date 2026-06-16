@@ -9,7 +9,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import get_llm
+from src.llm import get_llm, is_llm_timeout_error
 
 load_dotenv()
 
@@ -108,23 +108,33 @@ class RepairAgent:
         if target.exists() and target.is_file():
             migrated_code = target.read_text(encoding="utf-8")
 
-        result: RepairPlan | None = self._chain.invoke(
-            {
-                "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
-                "migration_result": json.dumps(
-                    migration_result, indent=2, sort_keys=True
-                ),
-                "validation_evidence": json.dumps(
-                    validation_evidence, indent=2, sort_keys=True
-                ),
-                "migrated_code": migrated_code,
-            }
-        )
-        repair_payload = (
-            result.model_dump()
-            if result is not None
-            else _fallback_repair_payload(validation_evidence)
-        )
+        try:
+            result: RepairPlan | None = self._chain.invoke(
+                {
+                    "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
+                    "migration_result": json.dumps(
+                        migration_result, indent=2, sort_keys=True
+                    ),
+                    "validation_evidence": json.dumps(
+                        validation_evidence, indent=2, sort_keys=True
+                    ),
+                    "migrated_code": migrated_code,
+                }
+            )
+        except Exception as exc:
+            if not is_llm_timeout_error(exc):
+                raise
+            repair_payload = _fallback_repair_payload(validation_evidence)
+            repair_payload["root_cause"] = (
+                repair_payload["root_cause"]
+                + f" Timeout while building repair plan: {exc}"
+            )
+        else:
+            repair_payload = (
+                result.model_dump()
+                if result is not None
+                else _fallback_repair_payload(validation_evidence)
+            )
         payload = {
             "agent": self.name,
             "step_id": planned_step["step_id"],

@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import get_llm
+from src.llm import format_llm_timeout_error, get_llm, is_llm_timeout_error
 from src.migration_config import MigrationConfig
 from src.tools.ast_transformer import apply_ast_transforms
 from src.tools.pattern_scanner import (
@@ -517,7 +517,19 @@ class MigrationAgent:
             "retry_feedback_context": retry_feedback_context,
         }
         for attempt in range(1, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS + 1):
-            result: MigrationResult | None = self._chain.invoke(prompt_payload)
+            try:
+                result: MigrationResult | None = self._chain.invoke(prompt_payload)
+            except Exception as exc:
+                if is_llm_timeout_error(exc):
+                    return (
+                        source,
+                        attempt,
+                        format_llm_timeout_error(
+                            f"migration step {step['step_id']} ({phase}) for {rel_file}",
+                            exc,
+                        ),
+                    )
+                raise
             migrated_code = getattr(result, "migrated_code", None)
             if isinstance(migrated_code, str):
                 plan = getattr(result, "migration_plan", "") or ""

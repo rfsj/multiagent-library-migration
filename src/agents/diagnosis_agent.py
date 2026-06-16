@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.llm import get_llm
+from src.llm import format_llm_timeout_error, get_llm, is_llm_timeout_error
 from src.tools.project_scanner import build_project_audit, scan_project
 
 load_dotenv()
@@ -326,24 +326,38 @@ class DiagnosisAgent:
             "dependency_files": scan["dependency_files"],
             "affected_source_files": scan["affected_source_files"],
         }
-        dataframe_flow: Optional[DataFrameFlowAnalysis] = self._flow_chain.invoke(
-            flow_payload
-        )
+        try:
+            dataframe_flow_result = self._flow_chain.invoke(flow_payload)
+            dataframe_flow: Optional[DataFrameFlowAnalysis] = (
+                dataframe_flow_result
+                if isinstance(dataframe_flow_result, DataFrameFlowAnalysis)
+                else None
+            )
+        except Exception as exc:
+            if not is_llm_timeout_error(exc):
+                raise
+            dataframe_flow = None
         if dataframe_flow is None:
             # Fallback: parse raw text if function calling returned nothing
-            raw_text: str = self._raw_flow_chain.invoke(flow_payload)
             try:
-                raw_text = raw_text.strip()
-                if raw_text.startswith("```"):
-                    lines = raw_text.splitlines()
-                    raw_text = "\n".join(
-                        l for l in lines if not l.startswith("```")
-                    ).strip()
-                dataframe_flow = DataFrameFlowAnalysis.model_validate(
-                    json.loads(raw_text)
-                )
-            except Exception:
+                raw_text: str = self._raw_flow_chain.invoke(flow_payload)
+            except Exception as exc:
+                if not is_llm_timeout_error(exc):
+                    raise
                 dataframe_flow = DataFrameFlowAnalysis()
+            else:
+                try:
+                    raw_text = raw_text.strip()
+                    if raw_text.startswith("```"):
+                        lines = raw_text.splitlines()
+                        raw_text = "\n".join(
+                            line for line in lines if not line.startswith("```")
+                        ).strip()
+                    dataframe_flow = DataFrameFlowAnalysis.model_validate(
+                        json.loads(raw_text)
+                    )
+                except Exception:
+                    dataframe_flow = DataFrameFlowAnalysis()
         flow_log_name = (
             "dataframe_flow_analysis.json"
             if replan_attempt == 0
@@ -458,7 +472,25 @@ class DiagnosisAgent:
     ) -> DiagnosisPlan:
         attempts = []
         for attempt in range(1, 3):
-            text: str = self._chain.invoke(payload)
+            try:
+                text: str = self._chain.invoke(payload)
+            except Exception as exc:
+                if not is_llm_timeout_error(exc):
+                    raise
+                attempts.append(
+                    {
+                        "attempt": attempt,
+                        "status": "timeout",
+                        "action": "retry" if attempt == 1 else "fail",
+                        "error": format_llm_timeout_error(
+                            f"diagnosis plan generation attempt {attempt}", exc
+                        ),
+                    }
+                )
+                if attempt == 2:
+                    self._write_planner_retry_log(logs_dir, replan_attempt, attempts)
+                    raise RuntimeError(attempts[-1]["error"]) from exc
+                continue
             result = self._parse_plan_text(text)
             if result is not None:
                 if attempts:
@@ -494,7 +526,9 @@ class DiagnosisAgent:
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
-            text = "\n".join(l for l in lines if not l.startswith("```")).strip()
+            text = "\n".join(
+                line for line in lines if not line.startswith("```")
+            ).strip()
         try:
             data = json.loads(text)
             return DiagnosisPlan.model_validate(data)

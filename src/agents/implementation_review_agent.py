@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, field_validator
 
-from src.llm import get_llm
+from src.llm import get_llm, is_llm_timeout_error
 
 load_dotenv()
 
@@ -175,7 +175,12 @@ class ImplementationReviewAgent:
             "migrated_code": migrated_code,
         }
         for attempt in range(1, MAX_STRUCTURED_OUTPUT_ATTEMPTS + 1):
-            result = self._chain.invoke(prompt_payload)
+            try:
+                result = self._chain.invoke(prompt_payload)
+            except Exception as exc:
+                if not is_llm_timeout_error(exc):
+                    raise
+                return None
             if result is not None:
                 return result, attempt
         return None

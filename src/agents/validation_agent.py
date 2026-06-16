@@ -12,7 +12,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import get_llm
+from src.llm import get_llm, is_llm_timeout_error
 from src.tools.diff_analyzer import analyze_diff, changed_files
 from src.tools.project_scanner import scan_project
 from src.tools.test_runner import run_pytest
@@ -177,20 +177,27 @@ class ValidationAgent:
         implementation (``rejected_implementation`` → retry) or the plan
         (``rejected_plan`` → replan). Falls back to a deterministic implementation
         rejection if the model returns no structured output."""
-        result = self._get_chain().invoke(
-            {
-                "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
-                "migration_result": json.dumps(
-                    migration_result, indent=2, sort_keys=True
-                ),
-                "before_snapshot": json.dumps(
-                    before_snapshot, indent=2, sort_keys=True
-                ),
-                "validation_evidence": json.dumps(
-                    validation_evidence, indent=2, sort_keys=True
-                ),
-            }
-        )
+        try:
+            result = self._get_chain().invoke(
+                {
+                    "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
+                    "migration_result": json.dumps(
+                        migration_result, indent=2, sort_keys=True
+                    ),
+                    "before_snapshot": json.dumps(
+                        before_snapshot, indent=2, sort_keys=True
+                    ),
+                    "validation_evidence": json.dumps(
+                        validation_evidence, indent=2, sort_keys=True
+                    ),
+                }
+            )
+        except Exception as exc:
+            if not is_llm_timeout_error(exc):
+                raise
+            return self._deterministic_step_verdict(
+                planned_step, migration_result, validation_evidence
+            )
         if not isinstance(result, ValidationVerdict):
             return self._deterministic_step_verdict(
                 planned_step, migration_result, validation_evidence

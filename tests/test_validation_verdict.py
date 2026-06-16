@@ -82,6 +82,31 @@ def test_escalation_falls_back_when_no_structured_output(tmp_path):
     assert verdict["verdict"] == "rejected_implementation"
 
 
+def test_escalation_timeout_falls_back_to_deterministic_verdict(tmp_path):
+    class TimeoutVerdictChain:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, payload):
+            self.calls += 1
+            raise TimeoutError("request timed out")
+
+    agent = ValidationAgent()
+    agent._chain = TimeoutVerdictChain()
+
+    verdict = agent.evaluate_step(
+        planned_step={"step_id": "step_001"},
+        migration_result={"changed": True},
+        before_snapshot={},
+        validation_evidence=_rejected_evidence(),
+        logs_dir=tmp_path,
+        retry_count=LLM_VERDICT_ESCALATE_AFTER,
+    )
+
+    assert agent._chain.calls == 1
+    assert verdict["verdict"] == "rejected_implementation"
+
+
 def test_false_negatives_count_rejected_plan_steps():
     metrics = build_metrics(
         tests_before={"status": "passed", "passed": True},
