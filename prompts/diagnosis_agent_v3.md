@@ -80,37 +80,18 @@ Examples:
 - keep a step broad only when splitting would make validation invalid;
 - keep unrelated files planned so partial progress remains auditable.
 
-## Output Contract
+## Output Guidance
 
-Return only structured JSON matching the tool schema. No markdown fences and no
-explanatory prose outside the JSON.
+Return the plan through the structured output schema.
 
-Every migration step must include:
+Focus on planning decisions:
 
-- `step_id`: `step_001`, `step_002`, ...
-- `file`: primary production file for the step;
-- `description`: concrete migration intent;
-- `allowed_files`: files the migration agent may edit;
-- `allowed_symbols`: top-level function/class names, or empty list;
-- `files`: grouped files, or empty list;
-- `status`: always `planned`.
+- which affected production files should be migrated;
+- how broad each migration step should be;
+- which files belong in each step's edit scope;
+- whether a step can be safely scoped to specific symbols;
+- what complexity level best describes each affected file;
+- what uncertainty should be reflected in the step description or complexity.
 
-The root plan must include:
-
-- `source_library`
-- `target_library`
-- `dependency_files`
-- `affected_files`
-- `related_tests`
-- `complexity`
-- `migration_steps`
-
-## Hard Constraints
-
-- `status` must always be `planned`.
-- Step IDs must be sequential and zero-padded.
-- Do not include tests in migration scope.
-- Do not include files outside the affected production files or dependency
-  files.
-- Do not use benchmark-specific names, values, expected outputs, or test
-  assertions as hidden special cases.
+Do not use benchmark-specific names, values, expected outputs, or test
+assertions as hidden special cases.
