@@ -30,7 +30,9 @@ def run_simple_workflow(state: WorkflowState) -> WorkflowState:
     graph.add_node("select_next_step", select_next_step)
     graph.add_node("snapshot_before_step", build_snapshot_node(snapshots_dir))
     graph.add_node("migrate_step", build_migration_node(migration_agent, logs_dir))
-    graph.add_node("validate_step", build_validation_node(validation_agent, logs_dir, repair_agent))
+    graph.add_node(
+        "validate_step", build_validation_node(validation_agent, logs_dir, repair_agent)
+    )
     graph.set_entry_point("diagnose")
     graph.add_edge("diagnose", "select_next_step")
     graph.add_conditional_edges(

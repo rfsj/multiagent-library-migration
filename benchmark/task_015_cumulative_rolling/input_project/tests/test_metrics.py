@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from finance.metrics import cumulative_revenue_by_product, daily_growth_rate, rolling_daily_average
+from finance.metrics import (
+    cumulative_revenue_by_product,
+    daily_growth_rate,
+    rolling_daily_average,
+)
 
 MULTI_ROWS = [
     "product_id,date,revenue",
@@ -42,13 +46,18 @@ def _columns(frame):
 def test_cumulative_revenue_columns(tmp_path):
     p = _csv(tmp_path, MULTI_ROWS, "multi.csv")
     assert _columns(cumulative_revenue_by_product(p)) == [
-        "product_id", "date", "revenue", "cumulative_revenue"
+        "product_id",
+        "date",
+        "revenue",
+        "cumulative_revenue",
     ]
 
 
 def test_cumulative_revenue_product_a(tmp_path):
     p = _csv(tmp_path, MULTI_ROWS, "multi.csv")
-    result = [r for r in _records(cumulative_revenue_by_product(p)) if r["product_id"] == "A"]
+    result = [
+        r for r in _records(cumulative_revenue_by_product(p)) if r["product_id"] == "A"
+    ]
     result.sort(key=lambda r: r["date"])
     assert result[0]["cumulative_revenue"] == 100
     assert result[1]["cumulative_revenue"] == 250
@@ -57,7 +66,9 @@ def test_cumulative_revenue_product_a(tmp_path):
 
 def test_cumulative_revenue_product_b(tmp_path):
     p = _csv(tmp_path, MULTI_ROWS, "multi.csv")
-    result = [r for r in _records(cumulative_revenue_by_product(p)) if r["product_id"] == "B"]
+    result = [
+        r for r in _records(cumulative_revenue_by_product(p)) if r["product_id"] == "B"
+    ]
     result.sort(key=lambda r: r["date"])
     assert result[0]["cumulative_revenue"] == 200
     assert result[1]["cumulative_revenue"] == 380

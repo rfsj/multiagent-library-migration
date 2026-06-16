@@ -104,7 +104,9 @@ class ValidationAgent:
         changed = changed_files(before_dir, project_dir)
         allowed = set(step.get("allowed_files", []))
         out_of_scope = [path for path in changed if path not in allowed]
-        self._install_dependencies(project_dir, logs_dir / f"{step['step_id']}_install.log")
+        self._install_dependencies(
+            project_dir, logs_dir / f"{step['step_id']}_install.log"
+        )
         tests = run_pytest(project_dir, logs_dir / f"{step['step_id']}_pytest.log")
         source_usage = self._source_usage_in_step_files(project_dir, step)
         missing_symbols = self._missing_public_symbols(project_dir, before_dir, step)
@@ -175,12 +177,20 @@ class ValidationAgent:
         implementation (``rejected_implementation`` → retry) or the plan
         (``rejected_plan`` → replan). Falls back to a deterministic implementation
         rejection if the model returns no structured output."""
-        result = self._get_chain().invoke({
-            "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
-            "migration_result": json.dumps(migration_result, indent=2, sort_keys=True),
-            "before_snapshot": json.dumps(before_snapshot, indent=2, sort_keys=True),
-            "validation_evidence": json.dumps(validation_evidence, indent=2, sort_keys=True),
-        })
+        result = self._get_chain().invoke(
+            {
+                "planned_step": json.dumps(planned_step, indent=2, sort_keys=True),
+                "migration_result": json.dumps(
+                    migration_result, indent=2, sort_keys=True
+                ),
+                "before_snapshot": json.dumps(
+                    before_snapshot, indent=2, sort_keys=True
+                ),
+                "validation_evidence": json.dumps(
+                    validation_evidence, indent=2, sort_keys=True
+                ),
+            }
+        )
         if not isinstance(result, ValidationVerdict):
             return self._deterministic_step_verdict(
                 planned_step, migration_result, validation_evidence
@@ -191,13 +201,17 @@ class ValidationAgent:
 
     def _get_chain(self):
         if self._chain is None:
-            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(encoding="utf-8")
+            system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(
+                encoding="utf-8"
+            )
             llm = get_llm().with_structured_output(ValidationVerdict)
             self._chain = (
-                ChatPromptTemplate.from_messages([
-                    SystemMessage(content=system_prompt),
-                    ("human", _HUMAN_TEMPLATE),
-                ])
+                ChatPromptTemplate.from_messages(
+                    [
+                        SystemMessage(content=system_prompt),
+                        ("human", _HUMAN_TEMPLATE),
+                    ]
+                )
                 | llm
             )
         return self._chain
@@ -255,7 +269,9 @@ class ValidationAgent:
         )
         log_file.write_text(proc.stdout, encoding="utf-8")
 
-    def _source_usage_in_step_files(self, project_dir: Path, step: dict[str, Any]) -> dict[str, int]:
+    def _source_usage_in_step_files(
+        self, project_dir: Path, step: dict[str, Any]
+    ) -> dict[str, int]:
         source_library = step.get("source_library")
         rel_files = step.get("files") or [step["file"]]
         if not source_library:
@@ -369,7 +385,9 @@ def _ast_library_aliases(tree: ast.Module, source_library: str) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == source_library or alias.name.startswith(f"{source_library}."):
+                if alias.name == source_library or alias.name.startswith(
+                    f"{source_library}."
+                ):
                     aliases.add(alias.asname or alias.name.split(".")[0])
     return aliases
 
@@ -441,19 +459,21 @@ def _ast_count_source_usage(
     return {"old_imports_remaining": old_imports, "unmigrated_uses": unmigrated_uses}
 
 
-_PYTEST_FAILURE_PATTERNS = frozenset({
-    "AttributeError:",
-    "TypeError:",
-    "ValueError:",
-    "AssertionError:",
-    "ImportError:",
-    "ModuleNotFoundError:",
-    # Polars-specific
-    "ColumnNotFoundError:",
-    "InvalidOperationError:",
-    "SchemaError:",
-    "ComputeError:",
-})
+_PYTEST_FAILURE_PATTERNS = frozenset(
+    {
+        "AttributeError:",
+        "TypeError:",
+        "ValueError:",
+        "AssertionError:",
+        "ImportError:",
+        "ModuleNotFoundError:",
+        # Polars-specific
+        "ColumnNotFoundError:",
+        "InvalidOperationError:",
+        "SchemaError:",
+        "ComputeError:",
+    }
+)
 
 
 def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
@@ -481,7 +501,8 @@ def _pytest_failure_excerpt(tests: dict[str, Any], max_lines: int = 80) -> str:
 
 def _missing_top_level_symbols(original_code: str, migrated_code: str) -> list[str]:
     return sorted(
-        _top_level_public_symbols(original_code) - _top_level_public_symbols(migrated_code)
+        _top_level_public_symbols(original_code)
+        - _top_level_public_symbols(migrated_code)
     )
 
 
@@ -515,15 +536,21 @@ def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
             "Restore the missing top-level public symbols and migrate their bodies "
             f"instead of dropping them: {', '.join(missing_symbols)}."
         )
-    has_assertion_index_diff = "At index" in pytest_feedback and " diff" in pytest_feedback
+    has_assertion_index_diff = (
+        "At index" in pytest_feedback and " diff" in pytest_feedback
+    )
     has_list_like_diff = "[" in pytest_feedback and "]" in pytest_feedback
     if "does not support `Series` assignment by index" in pytest_feedback:
         hints.append(
             "The migrated code is assigning columns with pandas syntax on a "
-            "Polars DataFrame. Replace df[\"col\"] = ... with df = "
-            "df.with_columns(...alias(\"col\"))."
+            'Polars DataFrame. Replace df["col"] = ... with df = '
+            'df.with_columns(...alias("col")).'
         )
-    if "object has no attribute 'sort'" in pytest_feedback or "object has no attribute 'with_columns'" in pytest_feedback or "object has no attribute 'group_by'" in pytest_feedback:
+    if (
+        "object has no attribute 'sort'" in pytest_feedback
+        or "object has no attribute 'with_columns'" in pytest_feedback
+        or "object has no attribute 'group_by'" in pytest_feedback
+    ):
         hints.append(
             "The migrated code is using Polars APIs on an object that is still a "
             "pandas DataFrame. Preserve producer/consumer type compatibility or "
@@ -555,14 +582,20 @@ def _actionable_validation_feedback(validation_evidence: dict[str, Any]) -> str:
             "ordering, and when pandas sorted before drop_duplicates(..., "
             "keep='first'), use unique(..., keep='first', maintain_order=True)."
         )
-    if "columns" in pytest_feedback or (has_assertion_index_diff and has_list_like_diff):
+    if "columns" in pytest_feedback or (
+        has_assertion_index_diff and has_list_like_diff
+    ):
         hints.append(
             "The migrated output may have a column-order mismatch. If this comes "
             "from a pivot/table reshape, preserve the original index columns and "
             "explicitly select pivoted value columns in the expected deterministic "
             "order before returning."
         )
-    if ": None" in pytest_feedback or ": null" in pytest_feedback or "None}" in pytest_feedback:
+    if (
+        ": None" in pytest_feedback
+        or ": null" in pytest_feedback
+        or "None}" in pytest_feedback
+    ):
         hints.append(
             "The migrated output includes a null grouping/index value. If the "
             "original pandas operation dropped null groups, filter null values "

@@ -50,10 +50,12 @@ def _records(frame):
 def _rounded_records(frame):
     rounded = []
     for record in _records(frame):
-        rounded.append({
-            key: round(value, 2) if isinstance(value, float) else value
-            for key, value in record.items()
-        })
+        rounded.append(
+            {
+                key: round(value, 2) if isinstance(value, float) else value
+                for key, value in record.items()
+            }
+        )
     return rounded
 
 
@@ -93,11 +95,31 @@ def test_revenue_by_region_groups_paid_orders(tmp_path: Path):
 
     result = revenue_by_region(orders_path)
 
-    assert _columns(result) == ["region", "total_revenue", "orders", "average_order_value"]
+    assert _columns(result) == [
+        "region",
+        "total_revenue",
+        "orders",
+        "average_order_value",
+    ]
     assert _rounded_records(result) == [
-        {"region": "south", "total_revenue": 330.0, "orders": 2, "average_order_value": 165.0},
-        {"region": "east", "total_revenue": 180.0, "orders": 2, "average_order_value": 90.0},
-        {"region": "north", "total_revenue": 120.0, "orders": 3, "average_order_value": 40.0},
+        {
+            "region": "south",
+            "total_revenue": 330.0,
+            "orders": 2,
+            "average_order_value": 165.0,
+        },
+        {
+            "region": "east",
+            "total_revenue": 180.0,
+            "orders": 2,
+            "average_order_value": 90.0,
+        },
+        {
+            "region": "north",
+            "total_revenue": 120.0,
+            "orders": 3,
+            "average_order_value": 40.0,
+        },
     ]
 
 
@@ -178,7 +200,9 @@ def test_quality_functions_detect_latest_and_invalid_rows(tmp_path: Path):
     latest = latest_order_per_customer(orders_path)
     invalid = invalid_order_rows(orders_path)
 
-    assert [(record["customer_id"], record["order_id"]) for record in _records(latest)] == [
+    assert [
+        (record["customer_id"], record["order_id"]) for record in _records(latest)
+    ] == [
         ("C001", 3),
         ("C002", 6),
         ("C003", 8),
@@ -188,7 +212,25 @@ def test_quality_functions_detect_latest_and_invalid_rows(tmp_path: Path):
         ("C007", 10),
     ]
     assert _records(invalid) == [
-        {"order_id": 7, "customer_id": "C005", "status": "paid", "quantity": 1, "unit_price": 40.0},
-        {"order_id": 9, "customer_id": "C006", "status": "paid", "quantity": 0, "unit_price": 250.0},
-        {"order_id": 10, "customer_id": "C007", "status": "unknown", "quantity": 1, "unit_price": 30.0},
+        {
+            "order_id": 7,
+            "customer_id": "C005",
+            "status": "paid",
+            "quantity": 1,
+            "unit_price": 40.0,
+        },
+        {
+            "order_id": 9,
+            "customer_id": "C006",
+            "status": "paid",
+            "quantity": 0,
+            "unit_price": 250.0,
+        },
+        {
+            "order_id": 10,
+            "customer_id": "C007",
+            "status": "unknown",
+            "quantity": 1,
+            "unit_price": 30.0,
+        },
     ]

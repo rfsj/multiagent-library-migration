@@ -35,9 +35,11 @@ def classify_risk(path):
 def effective_hourly_rate(path):
     df = pd.read_csv(path)
     df["hourly_rate"] = df.apply(
-        lambda row: round(row["salary"] / row["hours_worked"], 2)
-        if row["hours_worked"] > 0
-        else 0.0,
+        lambda row: (
+            round(row["salary"] / row["hours_worked"], 2)
+            if row["hours_worked"] > 0
+            else 0.0
+        ),
         axis=1,
     )
     return (

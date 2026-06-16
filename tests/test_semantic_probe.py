@@ -9,8 +9,17 @@ class FakeReviewAgent:
     def __init__(self):
         self.calls = []
 
-    def review(self, *, rel_file, original_code, migrated_code, planned_step,
-               dataframe_flow_analysis, logs_dir, log_suffix="implementation_review"):
+    def review(
+        self,
+        *,
+        rel_file,
+        original_code,
+        migrated_code,
+        planned_step,
+        dataframe_flow_analysis,
+        logs_dir,
+        log_suffix="implementation_review",
+    ):
         self.calls.append({"file": str(rel_file), "log_suffix": log_suffix})
         flagged = "FLAG_ME" in migrated_code
         return {

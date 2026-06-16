@@ -33,7 +33,11 @@ def _columns(frame):
 
 def test_extract_time_features_columns(tmp_path):
     assert _columns(extract_time_features(_csv(tmp_path))) == [
-        "event_id", "year", "month", "day", "hour"
+        "event_id",
+        "year",
+        "month",
+        "day",
+        "hour",
     ]
 
 
@@ -74,19 +78,25 @@ def test_events_per_date_sorted(tmp_path):
 
 def test_filter_by_hour_range_columns(tmp_path):
     assert _columns(filter_by_hour_range(_csv(tmp_path), 8, 18)) == [
-        "event_id", "timestamp", "event_type"
+        "event_id",
+        "timestamp",
+        "event_type",
     ]
 
 
 def test_filter_by_hour_range_includes_boundary(tmp_path):
-    result = {r["event_id"] for r in _records(filter_by_hour_range(_csv(tmp_path), 8, 18))}
+    result = {
+        r["event_id"] for r in _records(filter_by_hour_range(_csv(tmp_path), 8, 18))
+    }
     assert 1 in result
     assert 3 in result
     assert 5 in result
 
 
 def test_filter_by_hour_range_excludes_outside(tmp_path):
-    result = {r["event_id"] for r in _records(filter_by_hour_range(_csv(tmp_path), 8, 18))}
+    result = {
+        r["event_id"] for r in _records(filter_by_hour_range(_csv(tmp_path), 8, 18))
+    }
     assert 2 not in result
     assert 4 not in result
     assert 6 not in result

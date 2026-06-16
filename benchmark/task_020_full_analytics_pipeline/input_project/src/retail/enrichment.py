@@ -15,11 +15,22 @@ def enrich_transactions(txn_path, product_path):
     products["brand_clean"] = products["brand"].str.strip()
 
     merged = txns.merge(
-        products[["product_id", "category_clean", "brand_clean"]], on="product_id", how="left"
+        products[["product_id", "category_clean", "brand_clean"]],
+        on="product_id",
+        how="left",
     )
     merged["month"] = merged["transaction_date"].dt.strftime("%Y-%m")
     return (
-        merged[["transaction_id", "customer_id", "amount", "category_clean", "brand_clean", "month"]]
+        merged[
+            [
+                "transaction_id",
+                "customer_id",
+                "amount",
+                "category_clean",
+                "brand_clean",
+                "month",
+            ]
+        ]
         .sort_values("transaction_id")
         .reset_index(drop=True)
     )

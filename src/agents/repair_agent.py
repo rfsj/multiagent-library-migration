@@ -78,7 +78,9 @@ class RepairAgent:
     name = "repair_agent"
 
     def __init__(self) -> None:
-        system_prompt = (_PROMPTS_DIR / "repair_agent_v2.md").read_text(encoding="utf-8")
+        system_prompt = (_PROMPTS_DIR / "repair_agent_v2.md").read_text(
+            encoding="utf-8"
+        )
         llm = get_llm().with_structured_output(RepairPlan)
         self._chain = (
             ChatPromptTemplate.from_messages(

@@ -15,8 +15,7 @@ class ReviewRunner(Protocol):
         dataframe_flow_analysis: dict[str, Any],
         logs_dir: Path,
         log_suffix: str = "implementation_review",
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 def run_semantic_probe(

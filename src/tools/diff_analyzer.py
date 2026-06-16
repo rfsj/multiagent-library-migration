@@ -24,7 +24,11 @@ def changed_files(before_dir: Path, after_dir: Path) -> list[str]:
     for rel in sorted(before_paths | after_paths):
         before = before_dir / rel
         after = after_dir / rel
-        if not before.exists() or not after.exists() or not filecmp.cmp(before, after, shallow=False):
+        if (
+            not before.exists()
+            or not after.exists()
+            or not filecmp.cmp(before, after, shallow=False)
+        ):
             changed.append(rel)
     return changed
 
@@ -60,7 +64,9 @@ def analyze_diff(
     if allowed_files is None:
         expected_prefixes = ("src/", "requirements.txt")
         out_of_scope = [
-            path for path in changed if not (path == "requirements.txt" or path.startswith(expected_prefixes))
+            path
+            for path in changed
+            if not (path == "requirements.txt" or path.startswith(expected_prefixes))
         ]
     else:
         allowed = set(allowed_files)
@@ -73,4 +79,6 @@ def analyze_diff(
 
 
 def _ignored(path: Path) -> bool:
-    return bool(IGNORED_PARTS.intersection(path.parts)) or path.suffix in IGNORED_SUFFIXES
+    return (
+        bool(IGNORED_PARTS.intersection(path.parts)) or path.suffix in IGNORED_SUFFIXES
+    )

@@ -17,9 +17,9 @@ def load_sales(path: str | Path):
 def paid_high_value_orders(path: str | Path, minimum_total: float = 100.0):
     df = load_sales(path)
     filtered = df[(df["status"] == "paid") & (df["net_revenue"] >= minimum_total)]
-    return filtered[
-        ["order_id", "customer_id", "region", "net_revenue"]
-    ].sort_values(["net_revenue", "order_id"], ascending=[False, True])
+    return filtered[["order_id", "customer_id", "region", "net_revenue"]].sort_values(
+        ["net_revenue", "order_id"], ascending=[False, True]
+    )
 
 
 def revenue_by_region(path: str | Path):
@@ -44,9 +44,8 @@ def customer_lifetime_value(sales_path: str | Path, customers_path: str | Path):
     sales = load_sales(sales_path)
     customers = pd.read_csv(customers_path)
     paid_sales = sales[sales["status"] == "paid"]
-    totals = (
-        paid_sales.groupby("customer_id", as_index=False)
-        .agg(total_spend=("net_revenue", "sum"), paid_orders=("order_id", "nunique"))
+    totals = paid_sales.groupby("customer_id", as_index=False).agg(
+        total_spend=("net_revenue", "sum"), paid_orders=("order_id", "nunique")
     )
     result = customers.merge(totals, on="customer_id", how="left")
     result["total_spend"] = result["total_spend"].fillna(0.0).round(2)
@@ -54,7 +53,9 @@ def customer_lifetime_value(sales_path: str | Path, customers_path: str | Path):
     result["segment"] = result["total_spend"].apply(
         lambda value: "vip" if value >= 250 else "standard"
     )
-    return result.sort_values(["segment", "total_spend", "customer_id"], ascending=[False, False, True])
+    return result.sort_values(
+        ["segment", "total_spend", "customer_id"], ascending=[False, False, True]
+    )
 
 
 def monthly_product_matrix(path: str | Path):

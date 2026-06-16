@@ -11,6 +11,7 @@ Transforms implemented:
 - .reset_index(drop=True)  →  removed from the expression chain
 - .sort_values(by, ascending=...)  →  .sort(by, descending=...)
 """
+
 from __future__ import annotations
 
 import ast
@@ -25,7 +26,9 @@ class TransformResult:
     skipped: list[str] = field(default_factory=list)
 
 
-def apply_ast_transforms(source: str, source_library: str = "pandas") -> TransformResult:
+def apply_ast_transforms(
+    source: str, source_library: str = "pandas"
+) -> TransformResult:
     """Apply deterministic pandas→polars transforms to *source*.
 
     Runs three independent passes; each re-parses the output of the previous
@@ -54,6 +57,7 @@ def apply_ast_transforms(source: str, source_library: str = "pandas") -> Transfo
 # Pass 1: df["col"] = rhs  →  df = df.with_columns(polars_rhs.alias("col"))
 # ---------------------------------------------------------------------------
 
+
 def _pass_column_assignments(source: str) -> TransformResult:
     try:
         tree = ast.parse(source)
@@ -61,7 +65,9 @@ def _pass_column_assignments(source: str) -> TransformResult:
         return TransformResult(code=source, skipped=["syntax_error"])
 
     source_lines = source.splitlines(keepends=True)
-    replacements: list[tuple[int, int, str]] = []  # (start_0idx, end_0idx_excl, new_line)
+    replacements: list[
+        tuple[int, int, str]
+    ] = []  # (start_0idx, end_0idx_excl, new_line)
     applied: list[str] = []
     skipped: list[str] = []
 
@@ -99,7 +105,12 @@ def _collect_column_assign_replacements(
                 if isinstance(child, ast.stmt):
                     child_indent = _stmt_indent(child, source_lines)
                     _collect_column_assign_replacements(
-                        [child], source_lines, child_indent, replacements, applied, skipped
+                        [child],
+                        source_lines,
+                        child_indent,
+                        replacements,
+                        applied,
+                        skipped,
                     )
 
         if not isinstance(stmt, ast.Assign):
@@ -120,7 +131,7 @@ def _collect_column_assign_replacements(
 
         if _has_source_library_calls(stmt.value):
             skipped.append(
-                f"line {stmt.lineno}: {df_var}[\"{col_name}\"] = ... "
+                f'line {stmt.lineno}: {df_var}["{col_name}"] = ... '
                 "skipped — RHS contains library function calls"
             )
             continue
@@ -133,13 +144,13 @@ def _collect_column_assign_replacements(
         stmt_indent = _stmt_indent(stmt, source_lines)
         new_line = (
             f"{stmt_indent}{df_var} = {df_var}.with_columns("
-            f"({rhs_text}).alias(\"{col_name}\"))\n"
+            f'({rhs_text}).alias("{col_name}"))\n'
         )
         start = stmt.lineno - 1
         end = stmt.end_lineno
         replacements.append((start, end, new_line))
         applied.append(
-            f"line {stmt.lineno}: {df_var}[\"{col_name}\"] = ... "
+            f'line {stmt.lineno}: {df_var}["{col_name}"] = ... '
             f"→ {df_var} = {df_var}.with_columns(...)"
         )
 
@@ -170,14 +181,27 @@ class _ColumnRefToPolarsCol(ast.NodeTransformer):
         return node
 
 
-_PANDAS_ONLY_METHODS = frozenset({
-    "fillna", "sort_values", "groupby", "merge", "apply", "pivot_table",
-    "reset_index", "drop_duplicates", "astype", "isin", "isna", "notna",
-    "append", "iterrows",
-    # Note: to_datetime and to_frame are excluded because they also appear
-    # as valid polars chained methods (.str.to_datetime, Series.to_frame).
-    # pd.to_datetime() is already caught by the pd-alias check.
-})
+_PANDAS_ONLY_METHODS = frozenset(
+    {
+        "fillna",
+        "sort_values",
+        "groupby",
+        "merge",
+        "apply",
+        "pivot_table",
+        "reset_index",
+        "drop_duplicates",
+        "astype",
+        "isin",
+        "isna",
+        "notna",
+        "append",
+        "iterrows",
+        # Note: to_datetime and to_frame are excluded because they also appear
+        # as valid polars chained methods (.str.to_datetime, Series.to_frame).
+        # pd.to_datetime() is already caught by the pd-alias check.
+    }
+)
 
 
 def _has_source_library_calls(node: ast.AST) -> bool:
@@ -201,6 +225,7 @@ def _has_source_library_calls(node: ast.AST) -> bool:
 # ---------------------------------------------------------------------------
 # Pass 2: remove .reset_index(drop=True) from expression chains
 # ---------------------------------------------------------------------------
+
 
 def _pass_remove_reset_index(source: str) -> TransformResult:
     try:
@@ -250,9 +275,17 @@ def _find_reset_index_call(node: ast.AST) -> ast.Call | None:
         return None
     # Require drop=True as kwarg or first positional arg
     for kw in node.keywords:
-        if kw.arg == "drop" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+        if (
+            kw.arg == "drop"
+            and isinstance(kw.value, ast.Constant)
+            and kw.value.value is True
+        ):
             return node
-    if node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value is True:
+    if (
+        node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value is True
+    ):
         return node
     return None
 
@@ -260,6 +293,7 @@ def _find_reset_index_call(node: ast.AST) -> ast.Call | None:
 # ---------------------------------------------------------------------------
 # Pass 3: .sort_values(by, ascending=...) → .sort(by, descending=...)
 # ---------------------------------------------------------------------------
+
 
 def _pass_sort_values(source: str) -> TransformResult:
     try:
@@ -331,7 +365,9 @@ def _rewrite_sort_values(
     asc_val = ascending_kw.value
     # Single bool: ascending=True → no kwarg needed; ascending=False → descending=True
     if isinstance(asc_val, ast.Constant):
-        new_call.keywords = [kw for kw in new_call.keywords if kw.arg not in ("ascending", "axis")]
+        new_call.keywords = [
+            kw for kw in new_call.keywords if kw.arg not in ("ascending", "axis")
+        ]
         if asc_val.value is False:
             new_call.keywords.append(
                 ast.keyword(arg="descending", value=ast.Constant(value=True))
@@ -348,7 +384,9 @@ def _rewrite_sort_values(
             ctx=ast.Load(),
         )
         ast.fix_missing_locations(inverted)
-        new_call.keywords = [kw for kw in new_call.keywords if kw.arg not in ("ascending", "axis")]
+        new_call.keywords = [
+            kw for kw in new_call.keywords if kw.arg not in ("ascending", "axis")
+        ]
         new_call.keywords.append(ast.keyword(arg="descending", value=inverted))
         return new_call
 
@@ -362,6 +400,7 @@ def _rewrite_sort_values(
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _stmt_indent(node: ast.AST, source_lines: list[str]) -> str:
     lineno = getattr(node, "lineno", None)

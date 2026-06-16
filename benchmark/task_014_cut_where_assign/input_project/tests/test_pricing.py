@@ -31,7 +31,12 @@ def _columns(frame):
 
 
 def test_price_tier_columns(tmp_path):
-    assert _columns(price_tier(_csv(tmp_path))) == ["product_id", "name", "price", "tier"]
+    assert _columns(price_tier(_csv(tmp_path))) == [
+        "product_id",
+        "name",
+        "price",
+        "tier",
+    ]
 
 
 def test_price_tier_budget(tmp_path):
@@ -58,7 +63,10 @@ def test_price_tier_sorted(tmp_path):
 
 def test_apply_discount_columns(tmp_path):
     assert _columns(apply_discount(_csv(tmp_path))) == [
-        "product_id", "price", "stock", "discounted_price"
+        "product_id",
+        "price",
+        "stock",
+        "discounted_price",
     ]
 
 
@@ -77,7 +85,11 @@ def test_apply_discount_stock_under_100(tmp_path):
 
 def test_enrich_with_margin_columns(tmp_path):
     assert _columns(enrich_with_margin(_csv(tmp_path))) == [
-        "product_id", "price", "cost", "margin", "high_margin"
+        "product_id",
+        "price",
+        "cost",
+        "margin",
+        "high_margin",
     ]
 
 

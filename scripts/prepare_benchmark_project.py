@@ -92,7 +92,9 @@ def main() -> int:
     _install_requirements(project_dir)
 
     before = run_pytest(project_dir, prep_dir / "tests_before_preparation.log")
-    proposed_changes = _propose_changes(project_dir, prep_dir / "tests_before_preparation.log")
+    proposed_changes = _propose_changes(
+        project_dir, prep_dir / "tests_before_preparation.log"
+    )
 
     applied_changes: list[dict[str, Any]] = []
     if args.apply:
@@ -128,12 +130,17 @@ def main() -> int:
         encoding="utf-8",
     )
     print(json.dumps(report, indent=2))
-    return 0 if report["status"] in {"already_ready", "prepared", "changes_proposed"} else 1
+    return (
+        0
+        if report["status"] in {"already_ready", "prepared", "changes_proposed"}
+        else 1
+    )
 
 
 # ---------------------------------------------------------------------------
 # Propose changes
 # ---------------------------------------------------------------------------
+
 
 def _propose_changes(project_dir: Path, pytest_log: Path) -> list[dict[str, Any]]:
     log = pytest_log.read_text(encoding="utf-8")
@@ -153,7 +160,9 @@ def _propose_changes(project_dir: Path, pytest_log: Path) -> list[dict[str, Any]
     return changes
 
 
-def _propose_pytest_ini_testpaths_fix(project_dir: Path, log: str) -> dict[str, Any] | None:
+def _propose_pytest_ini_testpaths_fix(
+    project_dir: Path, log: str
+) -> dict[str, Any] | None:
     pytest_ini = project_dir / "pytest.ini"
     tests_dir = project_dir / "tests"
     if not pytest_ini.exists() or not tests_dir.exists():
@@ -173,7 +182,9 @@ def _propose_pytest_ini_testpaths_fix(project_dir: Path, log: str) -> dict[str, 
     }
 
 
-def _propose_missing_config_module_fix(project_dir: Path, log: str) -> dict[str, Any] | None:
+def _propose_missing_config_module_fix(
+    project_dir: Path, log: str
+) -> dict[str, Any] | None:
     match = re.search(r"No module named '([A-Za-z_][A-Za-z0-9_]*)\.config'", log)
     if not match:
         return None
@@ -185,10 +196,14 @@ def _propose_missing_config_module_fix(project_dir: Path, log: str) -> dict[str,
     if not package_dir.exists() or target.exists() or not config_dir.exists():
         return None
 
-    tests_reference_load_config = any(
-        "load_config" in path.read_text(encoding="utf-8", errors="ignore")
-        for path in (project_dir / "tests").rglob("test*.py")
-    ) if (project_dir / "tests").exists() else False
+    tests_reference_load_config = (
+        any(
+            "load_config" in path.read_text(encoding="utf-8", errors="ignore")
+            for path in (project_dir / "tests").rglob("test*.py")
+        )
+        if (project_dir / "tests").exists()
+        else False
+    )
     if not tests_reference_load_config:
         return None
 
@@ -202,7 +217,9 @@ def _propose_missing_config_module_fix(project_dir: Path, log: str) -> dict[str,
     }
 
 
-def _propose_missing_fixture_alias_fix(project_dir: Path, log: str) -> dict[str, Any] | None:
+def _propose_missing_fixture_alias_fix(
+    project_dir: Path, log: str
+) -> dict[str, Any] | None:
     match = re.search(r"fixture '([A-Za-z_][A-Za-z0-9_]*)' not found", log)
     if not match:
         return None
@@ -217,7 +234,9 @@ def _propose_missing_fixture_alias_fix(project_dir: Path, log: str) -> dict[str,
         return None
 
     source_fixture = None
-    if missing_fixture.endswith("_input_df") and re.search(r"def\s+source_df\s*\(", content):
+    if missing_fixture.endswith("_input_df") and re.search(
+        r"def\s+source_df\s*\(", content
+    ):
         source_fixture = "source_df"
     if source_fixture is None:
         return None
@@ -244,7 +263,8 @@ def _propose_missing_dep_fix(project_dir: Path, log: str) -> dict[str, Any] | No
 
     # Own packages present in the project root (should be installed via -e .)
     own_packages = {
-        d.name for d in project_dir.iterdir()
+        d.name
+        for d in project_dir.iterdir()
         if d.is_dir() and (d / "__init__.py").exists()
     }
 
@@ -303,6 +323,7 @@ def _propose_pandas_compat_fix(project_dir: Path, log: str) -> dict[str, Any] | 
 # Apply changes
 # ---------------------------------------------------------------------------
 
+
 def _apply_change(project_dir: Path, change: dict[str, Any]) -> bool:
     if change["type"] == "update_pytest_testpaths":
         path = project_dir / change["file"]
@@ -341,14 +362,13 @@ def _apply_change(project_dir: Path, change: dict[str, Any]) -> bool:
         req_path = project_dir / change["file"]
         existing = req_path.read_text(encoding="utf-8") if req_path.exists() else ""
         existing_lower = existing.lower()
-        to_add = [
-            p for p in change["packages"]
-            if p.lower() not in existing_lower
-        ]
+        to_add = [p for p in change["packages"] if p.lower() not in existing_lower]
         if not to_add:
             return False
         suffix = "" if not existing or existing.endswith("\n") else "\n"
-        req_path.write_text(existing + suffix + "\n".join(to_add) + "\n", encoding="utf-8")
+        req_path.write_text(
+            existing + suffix + "\n".join(to_add) + "\n", encoding="utf-8"
+        )
         return True
 
     if change["type"] == "add_pandas_compat_conftest":
@@ -378,8 +398,9 @@ def _install_requirements(project_dir: Path) -> None:
 # Misc helpers
 # ---------------------------------------------------------------------------
 
+
 def _yaml_config_loader_source() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -403,7 +424,7 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
             raise ValueError(f"Missing required config section: {section}")
 
     return config
-'''
+"""
 
 
 def _status(

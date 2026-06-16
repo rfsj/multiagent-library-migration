@@ -59,7 +59,9 @@ class RepairAwareFakeMigrationAgent(FakeMigrationAgent):
 
 
 class FakeValidationAgent:
-    def validate_step(self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path):
+    def validate_step(
+        self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path
+    ):
         assert before_dir.exists()
         return {
             "agent": "validation_agent",
@@ -160,7 +162,9 @@ class RejectFirstStepValidationAgent(FakeValidationAgent):
 
 
 class RepairableRejectValidationAgent(FakeValidationAgent):
-    def validate_step(self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path):
+    def validate_step(
+        self, project_dir: Path, step: dict, before_dir: Path, logs_dir: Path
+    ):
         return {
             "agent": "validation_agent",
             "step_id": step["step_id"],
@@ -264,14 +268,20 @@ def test_workflow_runs_migration_step_through_langgraph(tmp_path, monkeypatch):
     ]
     assert result.validations[0]["status"] == "approved"
     assert result.verdicts[0]["verdict"] == "accepted"
-    assert (project_dir / "src" / "example.py").read_text(encoding="utf-8") == "import polars as pl\n"
-    assert (tmp_path / "run" / "snapshots" / "before_step_001" / "src" / "example.py").exists()
+    assert (project_dir / "src" / "example.py").read_text(
+        encoding="utf-8"
+    ) == "import polars as pl\n"
+    assert (
+        tmp_path / "run" / "snapshots" / "before_step_001" / "src" / "example.py"
+    ).exists()
 
 
 def test_workflow_continues_after_step_exhausts_retries(tmp_path, monkeypatch):
     monkeypatch.setattr("src.graph.workflow.DiagnosisAgent", TwoStepDiagnosisAgent)
     monkeypatch.setattr("src.graph.workflow.MigrationAgent", FakeMigrationAgent)
-    monkeypatch.setattr("src.graph.workflow.ValidationAgent", RejectFirstStepValidationAgent)
+    monkeypatch.setattr(
+        "src.graph.workflow.ValidationAgent", RejectFirstStepValidationAgent
+    )
 
     project_dir = tmp_path / "project"
     source_dir = project_dir / "src"
@@ -305,15 +315,21 @@ def test_workflow_continues_after_step_exhausts_retries(tmp_path, monkeypatch):
     assert failed_content.startswith("import pandas as pd\n")
     assert "MIGRATION MANUAL REVIEW START step_001" in failed_content
     assert "Step failed fake validation." in failed_content
-    assert (source_dir / "two.py").read_text(encoding="utf-8") == "import polars as pl\n"
+    assert (source_dir / "two.py").read_text(
+        encoding="utf-8"
+    ) == "import polars as pl\n"
 
 
 def test_workflow_uses_repair_agent_feedback_for_retry(tmp_path, monkeypatch):
     fake_repair_agent = FakeRepairAgent()
     RepairAwareFakeMigrationAgent.retry_feedback_seen = []
     monkeypatch.setattr("src.graph.workflow.DiagnosisAgent", FakeDiagnosisAgent)
-    monkeypatch.setattr("src.graph.workflow.MigrationAgent", RepairAwareFakeMigrationAgent)
-    monkeypatch.setattr("src.graph.workflow.ValidationAgent", RepairableRejectValidationAgent)
+    monkeypatch.setattr(
+        "src.graph.workflow.MigrationAgent", RepairAwareFakeMigrationAgent
+    )
+    monkeypatch.setattr(
+        "src.graph.workflow.ValidationAgent", RepairableRejectValidationAgent
+    )
     monkeypatch.setattr("src.graph.workflow.RepairAgent", lambda: fake_repair_agent)
 
     project_dir = tmp_path / "project"
@@ -333,10 +349,22 @@ def test_workflow_uses_repair_agent_feedback_for_retry(tmp_path, monkeypatch):
 
     assert fake_repair_agent.calls
     assert result.retry_counts == {"step_001": 3}
-    retry_feedback = [feedback for feedback in RepairAwareFakeMigrationAgent.retry_feedback_seen if feedback]
+    retry_feedback = [
+        feedback
+        for feedback in RepairAwareFakeMigrationAgent.retry_feedback_seen
+        if feedback
+    ]
     assert retry_feedback
-    assert "RepairAgent produced a repair plan" in retry_feedback[0]["feedback_for_agent"]
-    assert "Failure category: unsupported_operation" in retry_feedback[0]["feedback_for_agent"]
+    assert (
+        "RepairAgent produced a repair plan" in retry_feedback[0]["feedback_for_agent"]
+    )
+    assert (
+        "Failure category: unsupported_operation"
+        in retry_feedback[0]["feedback_for_agent"]
+    )
     assert "Acceptance criteria" in retry_feedback[0]["feedback_for_agent"]
-    assert "No migrated Polars DataFrame uses df['col'] assignment." in retry_feedback[0]["feedback_for_agent"]
+    assert (
+        "No migrated Polars DataFrame uses df['col'] assignment."
+        in retry_feedback[0]["feedback_for_agent"]
+    )
     assert result.failed_steps[0]["step_id"] == "step_001"

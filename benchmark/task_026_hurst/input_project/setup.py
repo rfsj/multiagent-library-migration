@@ -4,7 +4,9 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 with open("requirements.txt", "r") as fh:
-    INSTALL_REQUIRES = [l.split('#')[0].strip() for l in fh if not l.strip().startswith('#')]
+    INSTALL_REQUIRES = [
+        l.split("#")[0].strip() for l in fh if not l.strip().startswith("#")
+    ]
 
 setuptools.setup(
     name="hurst",

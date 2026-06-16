@@ -72,7 +72,9 @@ def test_combine_survey_row_count(tmp_path):
 def test_combine_survey_values(tmp_path):
     d = _csv(tmp_path, DEMO_ROWS, "demo.csv")
     r = _csv(tmp_path, RESPONSE_ROWS, "resp.csv")
-    result = {row["respondent_id"]: row for row in _records(combine_survey_results(d, r))}
+    result = {
+        row["respondent_id"]: row for row in _records(combine_survey_results(d, r))
+    }
     assert result["R1"]["age"] == 25
     assert result["R1"]["q1"] == 8
     assert result["R2"]["city"] == "LA"

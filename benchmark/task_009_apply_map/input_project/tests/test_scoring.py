@@ -35,23 +35,31 @@ def test_assign_grade_columns(tmp_path):
 
 
 def test_assign_grade_a(tmp_path):
-    grades = {r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))}
+    grades = {
+        r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))
+    }
     assert grades["E001"] == "A"
 
 
 def test_assign_grade_b(tmp_path):
-    grades = {r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))}
+    grades = {
+        r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))
+    }
     assert grades["E003"] == "B"
 
 
 def test_assign_grade_c(tmp_path):
-    grades = {r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))}
+    grades = {
+        r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))
+    }
     assert grades["E002"] == "C"
     assert grades["E005"] == "C"
 
 
 def test_assign_grade_d(tmp_path):
-    grades = {r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))}
+    grades = {
+        r["employee_id"]: r["grade"] for r in _records(assign_grade(_csv(tmp_path)))
+    }
     assert grades["E004"] == "D"
 
 
@@ -69,7 +77,10 @@ def test_map_department_name_columns(tmp_path):
 
 
 def test_map_department_name_values(tmp_path):
-    result = {r["employee_id"]: r["department_name"] for r in _records(map_department_name(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["department_name"]
+        for r in _records(map_department_name(_csv(tmp_path)))
+    }
     assert result["E001"] == "Engineering"
     assert result["E002"] == "Human Resources"
     assert result["E003"] == "Marketing"
@@ -81,13 +92,18 @@ def test_apply_bonus_columns(tmp_path):
 
 
 def test_apply_bonus_default_rate(tmp_path):
-    result = {r["employee_id"]: r["bonus"] for r in _records(apply_bonus(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["bonus"] for r in _records(apply_bonus(_csv(tmp_path)))
+    }
     assert result["E001"] == 8000.0
     assert result["E002"] == 5500.0
     assert result["E005"] == 9000.0
 
 
 def test_apply_bonus_custom_rate(tmp_path):
-    result = {r["employee_id"]: r["bonus"] for r in _records(apply_bonus(_csv(tmp_path), rate=0.05))}
+    result = {
+        r["employee_id"]: r["bonus"]
+        for r in _records(apply_bonus(_csv(tmp_path), rate=0.05))
+    }
     assert result["E001"] == 4000.0
     assert result["E002"] == 2750.0

@@ -18,8 +18,7 @@ class ValidationRunner(Protocol):
         step: dict[str, Any],
         before_dir: Path,
         logs_dir: Path,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
     def evaluate_step(
         self,
@@ -29,8 +28,7 @@ class ValidationRunner(Protocol):
         validation_evidence: dict[str, Any],
         logs_dir: Path,
         retry_count: int = 0,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 class RepairRunner(Protocol):
@@ -43,8 +41,7 @@ class RepairRunner(Protocol):
         validation_evidence: dict[str, Any],
         logs_dir: Path,
         attempt: int,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 def build_validation_node(
@@ -110,25 +107,27 @@ def build_validation_node(
                 "rationale": verdict["rationale"],
                 "feedback_for_agent": verdict["feedback_for_agent"],
             }
-            updates.update({
-                "diagnosis": None,
-                "current_step": None,
-                "current_step_index": 0,
-                "current_snapshot_dir": None,
-                "current_migration": None,
-                "current_validation": None,
-                "replan_count": replan_count,
-                "replan_feedback": replan_feedback,
-                "replan_history": [
-                    *graph_state["replan_history"],
-                    {
-                        "step_id": step_id,
-                        "replan_attempt": replan_count,
-                        "feedback": replan_feedback,
-                    },
-                ],
-                "next_action": "replan",
-            })
+            updates.update(
+                {
+                    "diagnosis": None,
+                    "current_step": None,
+                    "current_step_index": 0,
+                    "current_snapshot_dir": None,
+                    "current_migration": None,
+                    "current_validation": None,
+                    "replan_count": replan_count,
+                    "replan_feedback": replan_feedback,
+                    "replan_history": [
+                        *graph_state["replan_history"],
+                        {
+                            "step_id": step_id,
+                            "replan_attempt": replan_count,
+                            "feedback": replan_feedback,
+                        },
+                    ],
+                    "next_action": "replan",
+                }
+            )
             return updates
 
         retry_counts = dict(graph_state["retry_counts"])
@@ -187,14 +186,16 @@ def build_validation_node(
             attempt=retry_counts[step_id],
         )
         _restore_project_dir(snapshot_dir, graph_state["project_dir"])
-        updates.update({
-            "retry_counts": retry_counts,
-            "current_step": retry_step,
-            "current_snapshot_dir": None,
-            "current_migration": None,
-            "current_validation": None,
-            "next_action": "retry",
-        })
+        updates.update(
+            {
+                "retry_counts": retry_counts,
+                "current_step": retry_step,
+                "current_snapshot_dir": None,
+                "current_migration": None,
+                "current_validation": None,
+                "next_action": "retry",
+            }
+        )
         return updates
 
     return validate_step
@@ -252,9 +253,7 @@ def _repair_plan_feedback(repair_plan: dict[str, Any], verdict: dict[str, Any]) 
             for instruction in repair_plan.get("instructions_for_migration_agent", [])
         )
         + "\n\nAcceptance criteria:\n"
-        + "\n".join(
-            f"- {item}" for item in repair_plan.get("acceptance_criteria", [])
-        )
+        + "\n".join(f"- {item}" for item in repair_plan.get("acceptance_criteria", []))
         + "\n\nMust not do:\n"
         + "\n".join(f"- {item}" for item in repair_plan.get("must_not_do", []))
         + "\n\nOriginal validation feedback:\n"
@@ -289,7 +288,9 @@ def _build_before_snapshot(before_dir: Path, step: dict[str, Any]) -> dict[str, 
 def _restore_project_dir(source_dir: Path, target_dir: Path) -> None:
     if target_dir.exists():
         shutil.rmtree(target_dir)
-    shutil.copytree(source_dir, target_dir, ignore=shutil.ignore_patterns(".venv", "__pycache__"))
+    shutil.copytree(
+        source_dir, target_dir, ignore=shutil.ignore_patterns(".venv", "__pycache__")
+    )
 
 
 def _mark_manual_review_required(
@@ -347,13 +348,17 @@ def _manual_review_marker(
     )
 
 
-def _insert_manual_review_marker(content: str, marker: str, step: dict[str, Any]) -> str:
+def _insert_manual_review_marker(
+    content: str, marker: str, step: dict[str, Any]
+) -> str:
     symbols = step.get("allowed_symbols", [])
     if symbols:
         symbol = symbols[0]
         lines = content.splitlines(keepends=True)
         for index, line in enumerate(lines):
-            if line.startswith(f"def {symbol}(") or line.startswith(f"async def {symbol}("):
+            if line.startswith(f"def {symbol}(") or line.startswith(
+                f"async def {symbol}("
+            ):
                 lines.insert(index, marker + "\n")
                 return "".join(lines)
     suffix = "" if content.endswith("\n") else "\n"

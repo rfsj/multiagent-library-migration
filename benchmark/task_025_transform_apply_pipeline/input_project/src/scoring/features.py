@@ -8,9 +8,11 @@ def add_group_stats(path):
     df["group_mean"] = df.groupby("category")["value"].transform("mean")
     df["group_std"] = df.groupby("category")["value"].transform("std").fillna(0)
     df["z_score"] = df.apply(
-        lambda row: round((row["value"] - row["group_mean"]) / row["group_std"], 2)
-        if row["group_std"] > 0
-        else 0.0,
+        lambda row: (
+            round((row["value"] - row["group_mean"]) / row["group_std"], 2)
+            if row["group_std"] > 0
+            else 0.0
+        ),
         axis=1,
     )
     return (

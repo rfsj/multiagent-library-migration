@@ -71,20 +71,28 @@ class LLMProxyLogger(BaseCallbackHandler):
         messages: list[list[Any]],
         **kwargs: Any,
     ) -> None:
-        kwargs_model = (kwargs.get("invocation_params") or {}).get("model") or (kwargs.get("invocation_params") or {}).get("model_name")
-        model_id = kwargs_model or serialized.get("name") or (serialized.get("id") or ["unknown"])[-1]
+        kwargs_model = (kwargs.get("invocation_params") or {}).get("model") or (
+            kwargs.get("invocation_params") or {}
+        ).get("model_name")
+        model_id = (
+            kwargs_model
+            or serialized.get("name")
+            or (serialized.get("id") or ["unknown"])[-1]
+        )
         _record_call()
-        self._write({
-            "event": "request",
-            "ts": datetime.now().isoformat(),
-            "run_id": str(kwargs.get("run_id", "")),
-            "label": _current_label or "unlabeled",
-            "model": model_id,
-            "messages": [
-                [{"role": m.type, "content": m.content} for m in batch]
-                for batch in messages
-            ],
-        })
+        self._write(
+            {
+                "event": "request",
+                "ts": datetime.now().isoformat(),
+                "run_id": str(kwargs.get("run_id", "")),
+                "label": _current_label or "unlabeled",
+                "model": model_id,
+                "messages": [
+                    [{"role": m.type, "content": m.content} for m in batch]
+                    for batch in messages
+                ],
+            }
+        )
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         generations = []
@@ -112,10 +120,12 @@ class LLMProxyLogger(BaseCallbackHandler):
                 batch_out.append(entry)
             generations.append(batch_out)
 
-        self._write({
-            "event": "response",
-            "ts": datetime.now().isoformat(),
-            "run_id": str(kwargs.get("run_id", "")),
-            "generations": generations,
-            "usage": response.llm_output,
-        })
+        self._write(
+            {
+                "event": "response",
+                "ts": datetime.now().isoformat(),
+                "run_id": str(kwargs.get("run_id", "")),
+                "generations": generations,
+                "usage": response.llm_output,
+            }
+        )

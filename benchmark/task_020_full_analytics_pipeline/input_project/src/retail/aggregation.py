@@ -11,7 +11,9 @@ def monthly_revenue_by_segment(txn_path, customer_path):
 
     customers = pd.read_csv(customer_path)
 
-    merged = txns.merge(customers[["customer_id", "segment"]], on="customer_id", how="left")
+    merged = txns.merge(
+        customers[["customer_id", "segment"]], on="customer_id", how="left"
+    )
     return (
         merged.groupby(["segment", "month"], as_index=False)["amount"]
         .sum()
@@ -30,5 +32,7 @@ def rolling_revenue_trend(txn_path, window=3):
         .sort_values("transaction_date")
         .reset_index(drop=True)
     )
-    daily["rolling_avg"] = daily["amount"].rolling(window, min_periods=1).mean().round(2)
+    daily["rolling_avg"] = (
+        daily["amount"].rolling(window, min_periods=1).mean().round(2)
+    )
     return daily[["transaction_date", "amount", "rolling_avg"]]

@@ -6,7 +6,9 @@ import pandas as pd
 def fulfillment_rate(orders_path, shipments_path):
     orders = pd.read_csv(orders_path)[["order_id", "customer_id"]].drop_duplicates()
     shipments = pd.read_csv(shipments_path)
-    shipped = shipments[shipments["status"] == "shipped"][["order_id"]].drop_duplicates()
+    shipped = shipments[shipments["status"] == "shipped"][
+        ["order_id"]
+    ].drop_duplicates()
     merged = orders.merge(shipped, on="order_id", how="left", indicator=True)
     total = len(merged)
     fulfilled = (merged["_merge"] == "both").sum()

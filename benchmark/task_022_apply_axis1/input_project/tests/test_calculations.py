@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hr.calculations import classify_risk, compute_total_compensation, effective_hourly_rate
+from hr.calculations import (
+    classify_risk,
+    compute_total_compensation,
+    effective_hourly_rate,
+)
 
 ROWS = [
     "employee_id,salary,bonus,allowance,absences,performance_score,hours_worked",
@@ -31,12 +35,19 @@ def _columns(frame):
 
 def test_total_compensation_columns(tmp_path):
     assert _columns(compute_total_compensation(_csv(tmp_path))) == [
-        "employee_id", "salary", "bonus", "allowance", "total"
+        "employee_id",
+        "salary",
+        "bonus",
+        "allowance",
+        "total",
     ]
 
 
 def test_total_compensation_values(tmp_path):
-    result = {r["employee_id"]: r["total"] for r in _records(compute_total_compensation(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["total"]
+        for r in _records(compute_total_compensation(_csv(tmp_path)))
+    }
     assert result["E001"] == 5700
     assert result["E002"] == 4350
     assert result["E003"] == 7100
@@ -49,22 +60,31 @@ def test_total_compensation_row_count(tmp_path):
 
 def test_classify_risk_columns(tmp_path):
     assert _columns(classify_risk(_csv(tmp_path))) == [
-        "employee_id", "absences", "performance_score", "risk"
+        "employee_id",
+        "absences",
+        "performance_score",
+        "risk",
     ]
 
 
 def test_classify_risk_high_absences(tmp_path):
-    result = {r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))
+    }
     assert result["E002"] == "high"
 
 
 def test_classify_risk_medium(tmp_path):
-    result = {r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))
+    }
     assert result["E003"] == "medium"
 
 
 def test_classify_risk_low(tmp_path):
-    result = {r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["risk"] for r in _records(classify_risk(_csv(tmp_path)))
+    }
     assert result["E001"] == "low"
     assert result["E004"] == "low"
 
@@ -75,17 +95,26 @@ def test_classify_risk_row_count(tmp_path):
 
 def test_effective_rate_columns(tmp_path):
     assert _columns(effective_hourly_rate(_csv(tmp_path))) == [
-        "employee_id", "salary", "hours_worked", "hourly_rate"
+        "employee_id",
+        "salary",
+        "hours_worked",
+        "hourly_rate",
     ]
 
 
 def test_effective_rate_normal(tmp_path):
-    result = {r["employee_id"]: r["hourly_rate"] for r in _records(effective_hourly_rate(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["hourly_rate"]
+        for r in _records(effective_hourly_rate(_csv(tmp_path)))
+    }
     assert result["E001"] == 31.25
     assert result["E003"] == round(6000 / 170, 2)
     assert result["E004"] == round(3500 / 150, 2)
 
 
 def test_effective_rate_zero_hours(tmp_path):
-    result = {r["employee_id"]: r["hourly_rate"] for r in _records(effective_hourly_rate(_csv(tmp_path)))}
+    result = {
+        r["employee_id"]: r["hourly_rate"]
+        for r in _records(effective_hourly_rate(_csv(tmp_path)))
+    }
     assert result["E002"] == 0.0

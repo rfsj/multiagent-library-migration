@@ -11,12 +11,16 @@ def category_distribution(path):
 
 def top_rated_products(path, n=3):
     df = pd.read_csv(path)
-    return df.nlargest(n, "rating")[["product_id", "name", "rating"]].reset_index(drop=True)
+    return df.nlargest(n, "rating")[["product_id", "name", "rating"]].reset_index(
+        drop=True
+    )
 
 
 def lowest_rated_products(path, n=2):
     df = pd.read_csv(path)
-    return df.nsmallest(n, "rating")[["product_id", "name", "rating"]].reset_index(drop=True)
+    return df.nsmallest(n, "rating")[["product_id", "name", "rating"]].reset_index(
+        drop=True
+    )
 
 
 def brand_unique_categories(path):

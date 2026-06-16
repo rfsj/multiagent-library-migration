@@ -38,7 +38,9 @@ class FakeReviewChain:
 
 def rule_based_migrate(source):
     output = source
-    output = re.sub(r"^import pandas as pd$", "import polars as pl", output, flags=re.MULTILINE)
+    output = re.sub(
+        r"^import pandas as pd$", "import polars as pl", output, flags=re.MULTILINE
+    )
     output = output.replace("pd.DataFrame(", "pl.DataFrame(")
     output = output.replace("pd.Series(", "pl.Series(")
     output = output.replace("pd.concat(", "pl.concat(")
@@ -84,9 +86,15 @@ def test_dependency_step_updates_only_requirements(tmp_path):
     )
 
     assert result["status"] == "completed"
-    assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npytest==8.3.4\npolars\n"
+    assert (
+        requirements.read_text(encoding="utf-8")
+        == "pandas==2.2.3\npytest==8.3.4\npolars\n"
+    )
     assert python_file.read_text(encoding="utf-8") == "import pandas as pd\n"
-    assert json.loads((logs_dir / "step_001_migration.json").read_text(encoding="utf-8")) == result
+    assert (
+        json.loads((logs_dir / "step_001_migration.json").read_text(encoding="utf-8"))
+        == result
+    )
 
 
 def test_validation_feedback_identifies_semantic_ordering_repairs():
@@ -142,7 +150,7 @@ def test_python_step_does_not_update_requirements(tmp_path):
     python_file = source_dir / "processing.py"
     requirements.write_text("pandas==2.2.3\npytest==8.3.4\n", encoding="utf-8")
     python_file.write_text(
-        'import pandas as pd\n\n'
+        "import pandas as pd\n\n"
         "def load(path):\n"
         "    df = pd.read_csv(path)\n"
         '    df = df[df["status"] == "paid"]\n'
@@ -251,8 +259,12 @@ def test_migration_agent_migrates_grouped_files_in_one_step(tmp_path):
 
     assert result["status"] == "completed"
     assert result["changed_files"] == ["src/loaders.py", "src/summaries.py"]
-    assert (source_dir / "loaders.py").read_text(encoding="utf-8") == "import polars as pl\n"
-    assert (source_dir / "summaries.py").read_text(encoding="utf-8") == "import polars as pl\n"
+    assert (source_dir / "loaders.py").read_text(
+        encoding="utf-8"
+    ) == "import polars as pl\n"
+    assert (source_dir / "summaries.py").read_text(
+        encoding="utf-8"
+    ) == "import polars as pl\n"
 
 
 def test_python_step_updates_requirements_when_allowed(tmp_path):
@@ -264,9 +276,7 @@ def test_python_step_updates_requirements_when_allowed(tmp_path):
     python_file = source_dir / "processing.py"
     requirements.write_text("pandas==2.2.3\npytest==8.3.4\n", encoding="utf-8")
     python_file.write_text(
-        'import pandas as pd\n\n'
-        "def load(path):\n"
-        "    return pd.read_csv(path)\n",
+        "import pandas as pd\n\ndef load(path):\n    return pd.read_csv(path)\n",
         encoding="utf-8",
     )
 
@@ -283,7 +293,10 @@ def test_python_step_updates_requirements_when_allowed(tmp_path):
 
     assert result["status"] == "completed"
     assert result["changed_files"] == ["src/processing.py", "requirements.txt"]
-    assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npytest==8.3.4\npolars\n"
+    assert (
+        requirements.read_text(encoding="utf-8")
+        == "pandas==2.2.3\npytest==8.3.4\npolars\n"
+    )
 
 
 def test_step_target_must_be_allowed(tmp_path):
@@ -328,7 +341,9 @@ def test_dependency_step_preserves_existing_target_version(tmp_path):
     logs_dir = tmp_path / "logs"
     project_dir.mkdir()
     requirements = project_dir / "requirements.txt"
-    requirements.write_text("pandas==2.2.3\npolars==1.17.1\npytest==8.3.4\n", encoding="utf-8")
+    requirements.write_text(
+        "pandas==2.2.3\npolars==1.17.1\npytest==8.3.4\n", encoding="utf-8"
+    )
 
     result = MigrationAgent().run_step(
         project_dir,
@@ -342,7 +357,10 @@ def test_dependency_step_preserves_existing_target_version(tmp_path):
     )
 
     assert result["status"] == "no_change"
-    assert requirements.read_text(encoding="utf-8") == "pandas==2.2.3\npolars==1.17.1\npytest==8.3.4\n"
+    assert (
+        requirements.read_text(encoding="utf-8")
+        == "pandas==2.2.3\npolars==1.17.1\npytest==8.3.4\n"
+    )
 
 
 def test_dependency_step_preserves_require_hashes_mode(monkeypatch, tmp_path):
@@ -384,7 +402,10 @@ def test_dependency_step_preserves_require_hashes_mode(monkeypatch, tmp_path):
     assert result["status"] == "completed"
     assert "polars\n" not in migrated
     assert "polars==1.41.1 \\" in migrated
-    assert "--hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" in migrated
+    assert (
+        "--hash=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        in migrated
+    )
 
 
 def test_generic_dataframe_helpers_migrate_without_project_markers(tmp_path):
@@ -398,7 +419,7 @@ def test_generic_dataframe_helpers_migrate_without_project_markers(tmp_path):
         "def make_frame(rows):\n"
         "    return pd.DataFrame(rows)\n\n\n"
         "def combine(left, right):\n"
-        "    return pd.concat([left, right]).to_dict(\"records\")\n",
+        '    return pd.concat([left, right]).to_dict("records")\n',
         encoding="utf-8",
     )
 
@@ -498,9 +519,7 @@ def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
     source_dir.mkdir(parents=True)
     python_file = source_dir / "processing.py"
     python_file.write_text(
-        "import pandas as pd\n\n\n"
-        "def load(path):\n"
-        "    return pd.read_csv(path)\n",
+        "import pandas as pd\n\n\ndef load(path):\n    return pd.read_csv(path)\n",
         encoding="utf-8",
     )
 
@@ -525,10 +544,7 @@ def test_symbol_step_removes_pandas_import_when_no_pd_uses_remain(tmp_path):
 def _raw_pandas_assignment_output():
     # df["x"] = ... is exactly what the AST fallback rewrites to with_columns.
     return (
-        "import polars as pl\n\n\n"
-        "def load(df):\n"
-        "    df[\"x\"] = df[\"a\"]\n"
-        "    return df\n"
+        'import polars as pl\n\n\ndef load(df):\n    df["x"] = df["a"]\n    return df\n'
     )
 
 
@@ -537,7 +553,9 @@ def _run_single_py_step(agent, tmp_path):
     source_dir = project_dir / "src"
     logs_dir = tmp_path / "logs"
     source_dir.mkdir(parents=True)
-    (source_dir / "p.py").write_text('import pandas as pd\n\n\ndef load(df):\n    return df\n', encoding="utf-8")
+    (source_dir / "p.py").write_text(
+        "import pandas as pd\n\n\ndef load(df):\n    return df\n", encoding="utf-8"
+    )
     agent.run_step(
         project_dir,
         {
@@ -605,17 +623,13 @@ def test_migration_does_not_run_pre_pytest_review_loop(tmp_path):
     source_dir.mkdir(parents=True)
     python_file = source_dir / "processing.py"
     python_file.write_text(
-        "import pandas as pd\n\n\n"
-        "def load(path):\n"
-        "    return pd.read_csv(path)\n",
+        "import pandas as pd\n\n\ndef load(path):\n    return pd.read_csv(path)\n",
         encoding="utf-8",
     )
     agent = MigrationAgent.__new__(MigrationAgent)
     agent._chain = FakeMigrationChain(
         [
-            "import polars as pl\n\n\n"
-            "def load(path):\n"
-            "    return pl.read_csv(path)\n",
+            "import polars as pl\n\n\ndef load(path):\n    return pl.read_csv(path)\n",
         ]
     )
 
@@ -636,9 +650,7 @@ def test_migration_does_not_run_pre_pytest_review_loop(tmp_path):
     assert len(agent._chain.calls) == 1
     assert not hasattr(agent, "_implementation_review_agent")
     assert python_file.read_text(encoding="utf-8") == (
-        "import polars as pl\n\n\n"
-        "def load(path):\n"
-        "    return pl.read_csv(path)\n"
+        "import polars as pl\n\n\ndef load(path):\n    return pl.read_csv(path)\n"
     )
 
 
@@ -683,15 +695,9 @@ def test_implementation_review_rejects_removed_public_symbols():
         },
         rel_file="src/example.py",
         original_code=(
-            "def load(path):\n"
-            "    pass\n\n"
-            "def invalid_rows(path):\n"
-            "    pass\n"
+            "def load(path):\n    pass\n\ndef invalid_rows(path):\n    pass\n"
         ),
-        migrated_code=(
-            "def load(path):\n"
-            "    pass\n"
-        ),
+        migrated_code=("def load(path):\n    pass\n"),
     )
 
     assert payload["status"] == "needs_revision"
@@ -776,5 +782,8 @@ def test_repair_agent_falls_back_when_structured_output_missing(tmp_path):
     assert payload["failure_category"] == "unknown"
     assert payload["repair_strategy"] == "fallback_to_validation_feedback"
     assert "Preserve semantic ordering." in payload["instructions_for_migration_agent"]
-    assert "Do not introduce benchmark-specific hardcoded values." in payload["must_not_do"]
+    assert (
+        "Do not introduce benchmark-specific hardcoded values."
+        in payload["must_not_do"]
+    )
     assert (logs_dir / "step_001_repair_01.json").exists()

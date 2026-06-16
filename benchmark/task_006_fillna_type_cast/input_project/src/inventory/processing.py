@@ -21,7 +21,6 @@ def out_of_stock_items(path):
 def expensive_items(path, min_price=50.0):
     df = pd.read_csv(path)
     df["price"] = df["price"].fillna(0.0)
-    return (
-        df[df["price"] >= min_price][["sku", "name", "price"]]
-        .sort_values("price", ascending=False)
+    return df[df["price"] >= min_price][["sku", "name", "price"]].sort_values(
+        "price", ascending=False
     )

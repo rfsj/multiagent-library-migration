@@ -21,7 +21,9 @@ def main() -> int:
 
     source = Path(args.project_path).expanduser().resolve()
     if not source.exists() or not source.is_dir():
-        raise FileNotFoundError(f"Project path does not exist or is not a directory: {source}")
+        raise FileNotFoundError(
+            f"Project path does not exist or is not a directory: {source}"
+        )
 
     task_dir = ROOT / "benchmark" / args.task_id
     input_project = task_dir / "input_project"
@@ -54,12 +56,17 @@ def main() -> int:
         json.dumps(metadata, indent=2) + "\n",
         encoding="utf-8",
     )
-    print(json.dumps({
-        "task_id": args.task_id,
-        "task_dir": str(task_dir),
-        "input_project": str(input_project),
-        "metadata": str(task_dir / "metadata.json"),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "task_id": args.task_id,
+                "task_dir": str(task_dir),
+                "input_project": str(input_project),
+                "metadata": str(task_dir / "metadata.json"),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

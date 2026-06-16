@@ -10,10 +10,14 @@ def load_ticks(path: str | Path):
     ticks["timestamp"] = pd.to_datetime(ticks["timestamp"], errors="coerce")
     ticks["price"] = ticks["price"].fillna(method="ffill")
     ticks = ticks[ticks["timestamp"].notna() & ticks["symbol"].notna()].copy()
-    return ticks.sort_values(["symbol", "timestamp", "trade_id"]).drop_duplicates(
-        subset=["symbol", "timestamp"],
-        keep="last",
-    ).reset_index(drop=True)
+    return (
+        ticks.sort_values(["symbol", "timestamp", "trade_id"])
+        .drop_duplicates(
+            subset=["symbol", "timestamp"],
+            keep="last",
+        )
+        .reset_index(drop=True)
+    )
 
 
 def daily_price_features(path: str | Path):

@@ -51,10 +51,12 @@ def _records(frame):
 def _rounded_records(frame):
     rounded = []
     for record in _records(frame):
-        rounded.append({
-            key: round(value, 2) if isinstance(value, float) else value
-            for key, value in record.items()
-        })
+        rounded.append(
+            {
+                key: round(value, 2) if isinstance(value, float) else value
+                for key, value in record.items()
+            }
+        )
     return rounded
 
 
@@ -84,7 +86,18 @@ def test_loaders_normalize_event_and_user_fields(tmp_path: Path):
     assert _records(events)[6]["channel"] == "unknown"
     assert _records(users)[1]["plan"] == "free"
     assert _records(users)[2]["country"] == "UNKNOWN"
-    assert [record["event_id"] for record in _records(valid)] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]
+    assert [record["event_id"] for record in _records(valid)] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        11,
+    ]
 
 
 def test_user_activity_summary_merges_users_with_activity(tmp_path: Path):
@@ -165,7 +178,12 @@ def test_first_touch_revenue_keeps_channel_and_purchase_totals(tmp_path: Path):
     assert _columns(result) == ["user_id", "channel", "total_revenue", "purchases"]
     assert _rounded_records(result) == [
         {"user_id": "U001", "channel": "email", "total_revenue": 120.5, "purchases": 1},
-        {"user_id": "U003", "channel": "unknown", "total_revenue": 120.0, "purchases": 2},
+        {
+            "user_id": "U003",
+            "channel": "unknown",
+            "total_revenue": 120.0,
+            "purchases": 2,
+        },
         {"user_id": "U002", "channel": "ads", "total_revenue": 0.0, "purchases": 0},
         {"user_id": "U004", "channel": "email", "total_revenue": 0.0, "purchases": 0},
     ]

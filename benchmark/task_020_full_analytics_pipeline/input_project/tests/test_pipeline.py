@@ -79,7 +79,11 @@ def test_load_transactions_row_count(tmp_path):
 def test_load_customers_columns(tmp_path):
     _, c, _ = _paths(tmp_path)
     assert _columns(load_customers(c)) == [
-        "customer_id", "email", "age_group", "signup_date", "segment"
+        "customer_id",
+        "email",
+        "age_group",
+        "signup_date",
+        "segment",
     ]
 
 
@@ -101,7 +105,12 @@ def test_load_customers_age_group(tmp_path):
 def test_enrich_transactions_columns(tmp_path):
     t, _, p = _paths(tmp_path)
     assert _columns(enrich_transactions(t, p)) == [
-        "transaction_id", "customer_id", "amount", "category_clean", "brand_clean", "month"
+        "transaction_id",
+        "customer_id",
+        "amount",
+        "category_clean",
+        "brand_clean",
+        "month",
     ]
 
 
@@ -120,7 +129,9 @@ def test_enrich_transactions_brand_stripped(tmp_path):
 
 def test_enrich_transactions_month(tmp_path):
     t, _, p = _paths(tmp_path)
-    result = {r["transaction_id"]: r["month"] for r in _records(enrich_transactions(t, p))}
+    result = {
+        r["transaction_id"]: r["month"] for r in _records(enrich_transactions(t, p))
+    }
     assert result["T1"] == "2024-01"
     assert result["T4"] == "2024-02"
 
@@ -128,13 +139,18 @@ def test_enrich_transactions_month(tmp_path):
 def test_flag_high_value_columns(tmp_path):
     t, _, _ = _paths(tmp_path)
     assert _columns(flag_high_value(t)) == [
-        "transaction_id", "customer_id", "amount", "is_high_value"
+        "transaction_id",
+        "customer_id",
+        "amount",
+        "is_high_value",
     ]
 
 
 def test_flag_high_value_true(tmp_path):
     t, _, _ = _paths(tmp_path)
-    result = {r["transaction_id"]: r["is_high_value"] for r in _records(flag_high_value(t))}
+    result = {
+        r["transaction_id"]: r["is_high_value"] for r in _records(flag_high_value(t))
+    }
     assert result["T2"] is True
     assert result["T4"] is True
     assert result["T6"] is True
@@ -142,7 +158,9 @@ def test_flag_high_value_true(tmp_path):
 
 def test_flag_high_value_false(tmp_path):
     t, _, _ = _paths(tmp_path)
-    result = {r["transaction_id"]: r["is_high_value"] for r in _records(flag_high_value(t))}
+    result = {
+        r["transaction_id"]: r["is_high_value"] for r in _records(flag_high_value(t))
+    }
     assert result["T1"] is False
     assert result["T7"] is False
 
@@ -154,26 +172,39 @@ def test_monthly_revenue_by_segment_columns(tmp_path):
 
 def test_monthly_revenue_premium_jan(tmp_path):
     t, c, _ = _paths(tmp_path)
-    result = {(r["segment"], r["month"]): r["amount"] for r in _records(monthly_revenue_by_segment(t, c))}
+    result = {
+        (r["segment"], r["month"]): r["amount"]
+        for r in _records(monthly_revenue_by_segment(t, c))
+    }
     assert result[("premium", "2024-01")] == 130.0
 
 
 def test_monthly_revenue_premium_feb(tmp_path):
     t, c, _ = _paths(tmp_path)
-    result = {(r["segment"], r["month"]): r["amount"] for r in _records(monthly_revenue_by_segment(t, c))}
+    result = {
+        (r["segment"], r["month"]): r["amount"]
+        for r in _records(monthly_revenue_by_segment(t, c))
+    }
     assert result[("premium", "2024-02")] == 350.0
 
 
 def test_monthly_revenue_standard(tmp_path):
     t, c, _ = _paths(tmp_path)
-    result = {(r["segment"], r["month"]): r["amount"] for r in _records(monthly_revenue_by_segment(t, c))}
+    result = {
+        (r["segment"], r["month"]): r["amount"]
+        for r in _records(monthly_revenue_by_segment(t, c))
+    }
     assert result[("standard", "2024-01")] == 120.0
     assert result[("standard", "2024-02")] == 60.0
 
 
 def test_rolling_revenue_trend_columns(tmp_path):
     t, _, _ = _paths(tmp_path)
-    assert _columns(rolling_revenue_trend(t)) == ["transaction_date", "amount", "rolling_avg"]
+    assert _columns(rolling_revenue_trend(t)) == [
+        "transaction_date",
+        "amount",
+        "rolling_avg",
+    ]
 
 
 def test_rolling_revenue_trend_first_row(tmp_path):
@@ -185,7 +216,10 @@ def test_rolling_revenue_trend_first_row(tmp_path):
 
 def test_rolling_revenue_trend_window3(tmp_path):
     t, _, _ = _paths(tmp_path)
-    result = {r["transaction_date"]: r["rolling_avg"] for r in _records(rolling_revenue_trend(t))}
+    result = {
+        r["transaction_date"]: r["rolling_avg"]
+        for r in _records(rolling_revenue_trend(t))
+    }
     assert result["2024-01-20"] == 83.33
     assert result["2024-02-05"] == 133.33
 
@@ -193,7 +227,10 @@ def test_rolling_revenue_trend_window3(tmp_path):
 def test_category_sales_report_columns(tmp_path):
     t, _, p = _paths(tmp_path)
     assert _columns(category_sales_report(t, p)) == [
-        "category_clean", "total_sales", "avg_transaction", "transaction_count"
+        "category_clean",
+        "total_sales",
+        "avg_transaction",
+        "transaction_count",
     ]
 
 

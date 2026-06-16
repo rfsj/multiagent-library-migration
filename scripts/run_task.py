@@ -16,7 +16,11 @@ from src import llm_proxy
 from src.agents.implementation_review_agent import ImplementationReviewAgent
 from src.agents.validation_agent import ValidationAgent
 from src.evaluation.metrics import build_metrics
-from src.evaluation.report_generator import environment_versions, git_commit, write_report
+from src.evaluation.report_generator import (
+    environment_versions,
+    git_commit,
+    write_report,
+)
 from src.evaluation.semantic_probe import run_semantic_probe
 from src.migration_config import MigrationConfig
 from src.graph.state import WorkflowState
@@ -81,7 +85,9 @@ def main() -> int:
             json.dumps(final_validation, indent=2),
             encoding="utf-8",
         )
-        (run_dir / "diff.patch").write_text(unified_diff(before_dir, project_dir), encoding="utf-8")
+        (run_dir / "diff.patch").write_text(
+            unified_diff(before_dir, project_dir), encoding="utf-8"
+        )
         report = _build_report(
             metadata=metadata,
             tests_before=tests_before,
@@ -173,7 +179,10 @@ def main() -> int:
 def _install_project_dependencies(project_dir: Path, log_file: Path) -> None:
     requirements = project_dir / "requirements.txt"
     if not requirements.exists():
-        log_file.write_text("No requirements.txt found; dependency installation skipped.\n", encoding="utf-8")
+        log_file.write_text(
+            "No requirements.txt found; dependency installation skipped.\n",
+            encoding="utf-8",
+        )
         return
     proc = subprocess.run(
         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
@@ -232,7 +241,12 @@ def _build_report(
 ) -> dict:
     semantic_risks = semantic_risks or []
     metrics = build_metrics(
-        tests_before, tests_after, final_validation, retry_counts, semantic_risks, verdicts
+        tests_before,
+        tests_after,
+        final_validation,
+        retry_counts,
+        semantic_risks,
+        verdicts,
     )
     return {
         "task_id": metadata["task_id"],
@@ -256,7 +270,9 @@ def _build_report(
         "verdicts": verdicts,
         "retry_counts": retry_counts,
         "failed_steps": failed_steps,
-        "migration_step_summary": _migration_step_summary(diagnosis, verdicts, failed_steps),
+        "migration_step_summary": _migration_step_summary(
+            diagnosis, verdicts, failed_steps
+        ),
         "abort_reason": abort_reason,
         "replan_count": replan_count,
         "replan_history": replan_history,

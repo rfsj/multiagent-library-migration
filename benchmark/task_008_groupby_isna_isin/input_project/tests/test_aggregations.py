@@ -59,7 +59,9 @@ def test_revenue_by_category_sorted_descending(tmp_path):
 
 def test_revenue_by_category_columns(tmp_path):
     assert _cols(revenue_by_category(_csv(tmp_path))) == [
-        "category", "total_revenue", "order_count"
+        "category",
+        "total_revenue",
+        "order_count",
     ]
 
 

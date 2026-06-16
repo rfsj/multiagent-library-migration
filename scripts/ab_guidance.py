@@ -23,6 +23,7 @@ Usage:
 LLMs are non-deterministic — use --runs >= 3 for a trend, more for confidence. Each run
 is a real migration (real LLM calls). See ai_docs/proposal-failure-mining.md (step #4).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,9 @@ _RUNS_DIR = ROOT / "experiments" / "runs"
 def run_once(task: str, scanner_on: bool) -> tuple[Path, dict] | None:
     """Run one migration in research mode with the scanner guidance on/off; return its
     (run_dir, report). Isolates the run by diffing the runs directory before/after."""
-    before = {p.name for p in _RUNS_DIR.glob(f"{task}_*")} if _RUNS_DIR.exists() else set()
+    before = (
+        {p.name for p in _RUNS_DIR.glob(f"{task}_*")} if _RUNS_DIR.exists() else set()
+    )
     env = {
         **os.environ,
         "MIGRATION_MODE": "research",
@@ -68,7 +71,9 @@ def run_once(task: str, scanner_on: bool) -> tuple[Path, dict] | None:
     return None
 
 
-def residue_constructs(run_dir: Path, source_library: str, target_library: str) -> set[str]:
+def residue_constructs(
+    run_dir: Path, source_library: str, target_library: str
+) -> set[str]:
     """Source constructs the model left unconverted in its raw first-pass output."""
     found: set[str] = set()
     for _file, pipeline in iter_migrated_files(run_dir):
@@ -92,7 +97,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("task")
     parser.add_argument("--runs", type=int, default=3, help="Runs por condição (>=3).")
-    parser.add_argument("--pattern", default=None, help="Foco num construct específico.")
+    parser.add_argument(
+        "--pattern", default=None, help="Foco num construct específico."
+    )
     args = parser.parse_args()
 
     # cond -> list of (status, residue_set); plus source/target libs captured from reports
@@ -104,7 +111,10 @@ def main() -> int:
     for cond in ("off", "on"):
         for _ in range(args.runs):
             done += 1
-            print(f"[{done}/{total}] {args.task} | guidance {cond.upper()} ...", flush=True)
+            print(
+                f"[{done}/{total}] {args.task} | guidance {cond.upper()} ...",
+                flush=True,
+            )
             outcome = run_once(args.task, scanner_on=(cond == "on"))
             if outcome is None:
                 print("  (run não produziu report — pulando)")
@@ -136,10 +146,14 @@ def _report(results: dict[str, list[tuple[str, set[str]]]], focus: str | None) -
     if focus:
         constructs = {focus}
 
-    print("\n=== A/B guidance do scanner (research; única variável = hint no prompt) ===")
+    print(
+        "\n=== A/B guidance do scanner (research; única variável = hint no prompt) ==="
+    )
     print(f"runs por condição: off={len(off)} on={len(on)}")
     print(f"success rate:  OFF {succ_off:.0%}  →  ON {succ_on:.0%}")
-    print("\nresíduo no passe cru (fração de runs em que o construct ficou SEM converter):")
+    print(
+        "\nresíduo no passe cru (fração de runs em que o construct ficou SEM converter):"
+    )
     print(f"  {'construct':<22}{'OFF':>6}{'ON':>6}   veredito")
     rows = []
     for c in constructs:
@@ -147,10 +161,14 @@ def _report(results: dict[str, list[tuple[str, set[str]]]], focus: str | None) -
         on_rate = _rate(on, lambda r, c=c: c in r[1])
         rows.append((c, off_rate, on_rate))
     for c, off_rate, on_rate in sorted(rows, key=lambda t: t[1], reverse=True):
-        print(f"  {c:<22}{off_rate:>5.0%}{on_rate:>6.0%}   {classify(off_rate, on_rate)}")
+        print(
+            f"  {c:<22}{off_rate:>5.0%}{on_rate:>6.0%}   {classify(off_rate, on_rate)}"
+        )
 
-    print("\nLembre: resíduo mede só NÃO-conversão. Se success sobe mas o resíduo já era "
-          "baixo, a falha é conversão-errada (ver mine_failures), não prompt.")
+    print(
+        "\nLembre: resíduo mede só NÃO-conversão. Se success sobe mas o resíduo já era "
+        "baixo, a falha é conversão-errada (ver mine_failures), não prompt."
+    )
 
 
 if __name__ == "__main__":

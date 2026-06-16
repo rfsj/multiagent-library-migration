@@ -46,7 +46,9 @@ def user_activity_summary(events_path: str | Path, users_path: str | Path):
 
 def first_touch_revenue(events_path: str | Path):
     events = valid_events(events_path)
-    first_touch = events.sort_values(["user_id", "event_time", "event_id"]).drop_duplicates(
+    first_touch = events.sort_values(
+        ["user_id", "event_time", "event_id"]
+    ).drop_duplicates(
         subset=["user_id"],
         keep="first",
     )
@@ -55,7 +57,9 @@ def first_touch_revenue(events_path: str | Path):
         .groupby("user_id", as_index=False)
         .agg(total_revenue=("revenue", "sum"), purchases=("event_id", "nunique"))
     )
-    result = first_touch[["user_id", "channel"]].merge(revenue, on="user_id", how="left")
+    result = first_touch[["user_id", "channel"]].merge(
+        revenue, on="user_id", how="left"
+    )
     result["total_revenue"] = result["total_revenue"].fillna(0.0).round(2)
     result["purchases"] = result["purchases"].fillna(0).astype(int)
     return result.sort_values(["total_revenue", "user_id"], ascending=[False, True])
@@ -66,7 +70,9 @@ def weekly_cohort_retention(events_path: str | Path, users_path: str | Path):
     events = valid_events(events_path)
     events["event_day"] = events["event_time"].dt.floor("D")
     unique_active_days = events.drop_duplicates(subset=["user_id", "event_day"]).copy()
-    joined = unique_active_days.merge(users[["user_id", "signup_date"]], on="user_id", how="inner")
+    joined = unique_active_days.merge(
+        users[["user_id", "signup_date"]], on="user_id", how="inner"
+    )
     joined["cohort"] = joined["signup_date"].dt.strftime("%Y-%m")
     joined["days_since_signup"] = (joined["event_day"] - joined["signup_date"]).dt.days
     window = joined[

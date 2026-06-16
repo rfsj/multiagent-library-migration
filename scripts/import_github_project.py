@@ -71,19 +71,25 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    print(json.dumps({
-        "task_id": args.task_id,
-        "source_repo": args.repo_url,
-        "task_dir": str(task_dir),
-        "input_project": str(input_project),
-        "metadata": str(task_dir / "metadata.json"),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "task_id": args.task_id,
+                "source_repo": args.repo_url,
+                "task_dir": str(task_dir),
+                "input_project": str(input_project),
+                "metadata": str(task_dir / "metadata.json"),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 # ---------------------------------------------------------------------------
 # Bootstrap helpers
 # ---------------------------------------------------------------------------
+
 
 def _bootstrap_project(project_dir: Path, source_lib: str) -> None:
     """Ensure the imported project has a minimal requirements.txt and pytest config."""
@@ -104,7 +110,8 @@ def _bootstrap_requirements(project_dir: Path, source_lib: str) -> None:
     # If the file only aggregates other requirements files (dev-tool includes),
     # it's not suitable as a benchmark driver — replace with a minimal one.
     real_lines = [
-        ln.strip() for ln in content.splitlines()
+        ln.strip()
+        for ln in content.splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if real_lines and all(ln.startswith("-r ") for ln in real_lines):
@@ -143,7 +150,8 @@ def _bootstrap_pytest_ini(project_dir: Path) -> None:
         return
 
     py_files = [
-        f for f in test_root.rglob("*.py")
+        f
+        for f in test_root.rglob("*.py")
         if f.name not in ("__init__.py", "conftest.py")
     ]
     if not py_files:

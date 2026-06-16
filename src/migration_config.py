@@ -24,6 +24,7 @@ Note: a clean CoT ablation requires a CoT-free base prompt (e.g.
 migration_agent_v4.md). With v5 as base the instruction is already inline, so the
 `use_cot=False` modes would not be truly CoT-free. See MIGRATION_PROMPT_FILE.
 """
+
 from __future__ import annotations
 
 import os
@@ -39,25 +40,31 @@ def _env_flag(name: str) -> bool | None:
 
 @dataclass(frozen=True)
 class MigrationConfig:
-    use_pattern_scanner: bool      # inject known-gotcha hints into the prompt
-    use_rescan_retry: bool         # re-scan output and force a retry on remaining patterns
-    use_ast_fallback: bool         # deterministically rewrite mechanical patterns
-    regenerate_invalid_syntax: bool  # guard: re-ask the LLM if output is not valid Python
-    enforce_symbol_scope: bool     # guard: clip output back to allowed symbols
-    use_few_shot: bool = False     # prepend fixed input/output example pairs to the prompt
-    use_cot: bool = False          # inject a chain-of-thought instruction (fill migration_plan first)
+    use_pattern_scanner: bool  # inject known-gotcha hints into the prompt
+    use_rescan_retry: bool  # re-scan output and force a retry on remaining patterns
+    use_ast_fallback: bool  # deterministically rewrite mechanical patterns
+    regenerate_invalid_syntax: (
+        bool  # guard: re-ask the LLM if output is not valid Python
+    )
+    enforce_symbol_scope: bool  # guard: clip output back to allowed symbols
+    use_few_shot: bool = False  # prepend fixed input/output example pairs to the prompt
+    use_cot: bool = (
+        False  # inject a chain-of-thought instruction (fill migration_plan first)
+    )
 
     @property
     def mode(self) -> str:
         if self == self.assisted():
             return "assisted"
-        pure_base = not any((
-            self.use_pattern_scanner,
-            self.use_rescan_retry,
-            self.use_ast_fallback,
-            self.regenerate_invalid_syntax,
-            self.enforce_symbol_scope,
-        ))
+        pure_base = not any(
+            (
+                self.use_pattern_scanner,
+                self.use_rescan_retry,
+                self.use_ast_fallback,
+                self.regenerate_invalid_syntax,
+                self.enforce_symbol_scope,
+            )
+        )
         if pure_base:
             return {
                 (False, False): "research",
@@ -95,16 +102,29 @@ class MigrationConfig:
 
     @classmethod
     def from_env(cls) -> "MigrationConfig":
-        mode = os.environ.get("MIGRATION_MODE", "research").strip().lower().replace("-", "_")
+        mode = (
+            os.environ.get("MIGRATION_MODE", "research")
+            .strip()
+            .lower()
+            .replace("-", "_")
+        )
         base = _base_for_mode(cls, mode)
         return cls(
-            use_pattern_scanner=_pick(_env_flag("MIGRATION_USE_SCANNER"), base.use_pattern_scanner),
-            use_rescan_retry=_pick(_env_flag("MIGRATION_USE_RESCAN"), base.use_rescan_retry),
-            use_ast_fallback=_pick(_env_flag("MIGRATION_USE_AST"), base.use_ast_fallback),
+            use_pattern_scanner=_pick(
+                _env_flag("MIGRATION_USE_SCANNER"), base.use_pattern_scanner
+            ),
+            use_rescan_retry=_pick(
+                _env_flag("MIGRATION_USE_RESCAN"), base.use_rescan_retry
+            ),
+            use_ast_fallback=_pick(
+                _env_flag("MIGRATION_USE_AST"), base.use_ast_fallback
+            ),
             regenerate_invalid_syntax=_pick(
                 _env_flag("MIGRATION_USE_SYNTAX_REGEN"), base.regenerate_invalid_syntax
             ),
-            enforce_symbol_scope=_pick(_env_flag("MIGRATION_USE_SCOPE"), base.enforce_symbol_scope),
+            enforce_symbol_scope=_pick(
+                _env_flag("MIGRATION_USE_SCOPE"), base.enforce_symbol_scope
+            ),
             use_few_shot=_pick(_env_flag("MIGRATION_USE_FEWSHOT"), base.use_few_shot),
             use_cot=_pick(_env_flag("MIGRATION_USE_COT"), base.use_cot),
         )

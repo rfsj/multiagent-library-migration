@@ -8,24 +8,28 @@ https://en.wikipedia.org/wiki/Rescaled_range
 """
 
 name = "hurst"
-__version__ = '0.0.5'
+__version__ = "0.0.5"
 
 import sys
 import math
 import warnings
 import numpy as np
+
 try:
     import pandas as pd
 except:
     pass
 
+
 def __to_inc(x):
     incs = x[1:] - x[:-1]
     return incs
 
+
 def __to_pct(x):
-    pcts = x[1:] / x[:-1] - 1.
+    pcts = x[1:] / x[:-1] - 1.0
     return pcts
+
 
 def __get_simplified_RS(series, kind):
     """
@@ -40,17 +44,17 @@ def __get_simplified_RS(series, kind):
         The kind of series (refer to compute_Hc docstring)
     """
 
-    if kind == 'random_walk':
+    if kind == "random_walk":
         incs = __to_inc(series)
         R = max(series) - min(series)  # range in absolute values
         S = np.std(incs, ddof=1)
-    elif kind == 'price':
+    elif kind == "price":
         pcts = __to_pct(series)
-        R = max(series) / min(series) - 1. # range in percent
+        R = max(series) / min(series) - 1.0  # range in percent
         S = np.std(pcts, ddof=1)
-    elif kind == 'change':
+    elif kind == "change":
         incs = series
-        _series = np.hstack([[0.],np.cumsum(incs)])
+        _series = np.hstack([[0.0], np.cumsum(incs)])
         R = max(_series) - min(_series)  # range in absolute values
         S = np.std(incs, ddof=1)
 
@@ -58,6 +62,7 @@ def __get_simplified_RS(series, kind):
         return 0  # return 0 to skip this interval due the undefined R/S ratio
 
     return R / S
+
 
 def __get_RS(series, kind):
     """
@@ -74,7 +79,7 @@ def __get_RS(series, kind):
         The kind of series (refer to compute_Hc docstring)
     """
 
-    if kind == 'random_walk':
+    if kind == "random_walk":
         incs = __to_inc(series)
         mean_inc = (series[-1] - series[0]) / len(incs)
         deviations = incs - mean_inc
@@ -82,7 +87,7 @@ def __get_RS(series, kind):
         R = max(Z) - min(Z)
         S = np.std(incs, ddof=1)
 
-    elif kind == 'price':
+    elif kind == "price":
         incs = __to_pct(series)
         mean_inc = np.sum(incs) / len(incs)
         deviations = incs - mean_inc
@@ -90,7 +95,7 @@ def __get_RS(series, kind):
         R = max(Z) - min(Z)
         S = np.std(incs, ddof=1)
 
-    elif kind == 'change':
+    elif kind == "change":
         incs = series
         mean_inc = np.sum(incs) / len(incs)
         deviations = incs - mean_inc
@@ -103,7 +108,15 @@ def __get_RS(series, kind):
 
     return R / S
 
-def compute_Hc(series, kind="random_walk", min_window=10, max_window=None, simplified=True, min_sample=100):
+
+def compute_Hc(
+    series,
+    kind="random_walk",
+    min_window=10,
+    max_window=None,
+    simplified=True,
+    min_sample=100,
+):
     """
     Compute H (Hurst exponent) and C according to Hurst equation:
     E(R/S) = c * T^H
@@ -143,8 +156,10 @@ def compute_Hc(series, kind="random_walk", min_window=10, max_window=None, simpl
         for further plotting log(data[0]) on X and log(data[1]) on Y
     """
 
-    if len(series)<min_sample:
-        raise ValueError(f"Series length must be greater or equal to min_sample={min_sample}" )
+    if len(series) < min_sample:
+        raise ValueError(
+            f"Series length must be greater or equal to min_sample={min_sample}"
+        )
 
     ndarray_likes = [np.ndarray]
     if "pandas.core.series" in sys.modules.keys():
@@ -154,7 +169,10 @@ def compute_Hc(series, kind="random_walk", min_window=10, max_window=None, simpl
     if type(series) not in ndarray_likes:
         series = np.array(series)
 
-    if "pandas.core.series" in sys.modules.keys() and type(series) == pd.core.series.Series:
+    if (
+        "pandas.core.series" in sys.modules.keys()
+        and type(series) == pd.core.series.Series
+    ):
         if series.isnull().values.any():
             raise ValueError("Series contains NaNs")
         series = series.values  # convert pandas Series to numpy array
@@ -166,23 +184,25 @@ def compute_Hc(series, kind="random_walk", min_window=10, max_window=None, simpl
     else:
         RS_func = __get_RS
 
-
     err = np.geterr()
-    np.seterr(all='raise')
+    np.seterr(all="raise")
 
-    max_window = max_window or len(series)-1
-    window_sizes = list(map(
-        lambda x: int(10**x),
-        np.arange(math.log10(min_window), math.log10(max_window), 0.25)))
+    max_window = max_window or len(series) - 1
+    window_sizes = list(
+        map(
+            lambda x: int(10**x),
+            np.arange(math.log10(min_window), math.log10(max_window), 0.25),
+        )
+    )
     window_sizes.append(len(series))
 
     RS = []
     for w in window_sizes:
         rs = []
         for start in range(0, len(series), w):
-            if (start+w)>len(series):
+            if (start + w) > len(series):
                 break
-            _ = RS_func(series[start:start+w], kind)
+            _ = RS_func(series[start : start + w], kind)
             if _ != 0:
                 rs.append(_)
         RS.append(np.mean(rs))
@@ -193,6 +213,7 @@ def compute_Hc(series, kind="random_walk", min_window=10, max_window=None, simpl
 
     c = 10**c
     return H, c, [window_sizes, RS]
+
 
 def random_walk(length, proba=0.5, min_lookback=1, max_lookback=100, cumprod=False):
     """
@@ -213,45 +234,52 @@ def random_walk(length, proba=0.5, min_lookback=1, max_lookback=100, cumprod=Fal
         generate a random walk as a cumulative product instead of cumulative sum
     """
 
-    assert(min_lookback>=1)
-    assert(max_lookback>=min_lookback)
+    assert min_lookback >= 1
+    assert max_lookback >= min_lookback
 
     if max_lookback > length:
         max_lookback = length
-        warnings.warn("max_lookback parameter has been set to the length of the random walk series.")
+        warnings.warn(
+            "max_lookback parameter has been set to the length of the random walk series."
+        )
 
     if not cumprod:  # ordinary increments
-        series = [0.] * length  # array of prices
+        series = [0.0] * length  # array of prices
         for i in range(1, length):
             if i < min_lookback + 1:
                 direction = np.sign(np.random.randn())
             else:
-                lookback = np.random.randint(min_lookback, min(i-1, max_lookback)+1)
-                direction = np.sign(series[i-1] - series[i-1-lookback]) * np.sign(proba - np.random.uniform())
-            series[i] = series[i-1] + np.fabs(np.random.randn()) * direction
+                lookback = np.random.randint(min_lookback, min(i - 1, max_lookback) + 1)
+                direction = np.sign(series[i - 1] - series[i - 1 - lookback]) * np.sign(
+                    proba - np.random.uniform()
+                )
+            series[i] = series[i - 1] + np.fabs(np.random.randn()) * direction
     else:  # percent changes
-        series = [1.] * length  # array of prices
+        series = [1.0] * length  # array of prices
         for i in range(1, length):
             if i < min_lookback + 1:
                 direction = np.sign(np.random.randn())
             else:
-                lookback = np.random.randint(min_lookback, min(i-1, max_lookback)+1)
-                direction = np.sign(series[i-1] / series[i-1-lookback] - 1.) * np.sign(proba - np.random.uniform())
-            series[i] = series[i-1] * np.fabs(1 + np.random.randn()/1000. * direction)
+                lookback = np.random.randint(min_lookback, min(i - 1, max_lookback) + 1)
+                direction = np.sign(
+                    series[i - 1] / series[i - 1 - lookback] - 1.0
+                ) * np.sign(proba - np.random.uniform())
+            series[i] = series[i - 1] * np.fabs(
+                1 + np.random.randn() / 1000.0 * direction
+            )
 
     return series
 
 
-if __name__ == '__main__':
-
+if __name__ == "__main__":
     # Use random_walk() function or generate a random walk series manually:
     # series = random_walk(99999, cumprod=True)
     np.random.seed(42)
-    random_changes = 1. + np.random.randn(99999) / 1000.
+    random_changes = 1.0 + np.random.randn(99999) / 1000.0
     series = np.cumprod(random_changes)  # create a random walk from random changes
 
     # Evaluate Hurst equation
-    H, c, data = compute_Hc(series, kind='price', simplified=True)
+    H, c, data = compute_Hc(series, kind="price", simplified=True)
 
     # Plot
     # uncomment the following to make a plot using Matplotlib:
@@ -269,6 +297,5 @@ if __name__ == '__main__':
     plt.show()
     """
 
-    print("H={:.4f}, c={:.4f}".format(H,c))
-    assert H<0.6 and H>0.4
-
+    print("H={:.4f}, c={:.4f}".format(H, c))
+    assert H < 0.6 and H > 0.4

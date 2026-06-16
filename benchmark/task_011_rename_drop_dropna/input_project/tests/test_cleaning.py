@@ -56,51 +56,70 @@ def test_standardize_columns_sorted(tmp_path):
 
 
 def test_standardize_columns_values(tmp_path):
-    result = {r["customer_id"]: r["revenue"] for r in _records(standardize_columns(_csv(tmp_path, RENAME_ROWS, "rename.csv")))}
+    result = {
+        r["customer_id"]: r["revenue"]
+        for r in _records(
+            standardize_columns(_csv(tmp_path, RENAME_ROWS, "rename.csv"))
+        )
+    }
     assert result["C1"] == 100.0
     assert result["C2"] == 200.0
     assert result["C3"] == 150.0
 
 
 def test_remove_incomplete_drops_null_revenue(tmp_path):
-    result = _records(remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv")))
+    result = _records(
+        remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 2 not in sale_ids
 
 
 def test_remove_incomplete_drops_null_quantity(tmp_path):
-    result = _records(remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv")))
+    result = _records(
+        remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 3 not in sale_ids
 
 
 def test_remove_incomplete_keeps_complete_rows(tmp_path):
-    result = _records(remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv")))
+    result = _records(
+        remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 1 in sale_ids
     assert 4 in sale_ids
 
 
 def test_remove_incomplete_sorted(tmp_path):
-    result = _records(remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv")))
+    result = _records(
+        remove_incomplete(_csv(tmp_path, INCOMPLETE_ROWS, "incomplete.csv"))
+    )
     ids = [r["sale_id"] for r in result]
     assert ids == sorted(ids)
 
 
 def test_clean_for_reporting_removes_zero_revenue(tmp_path):
-    result = _records(clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv")))
+    result = _records(
+        clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 2 not in sale_ids
 
 
 def test_clean_for_reporting_removes_negative_revenue(tmp_path):
-    result = _records(clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv")))
+    result = _records(
+        clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 4 not in sale_ids
 
 
 def test_clean_for_reporting_keeps_positive_rows(tmp_path):
-    result = _records(clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv")))
+    result = _records(
+        clean_for_reporting(_csv(tmp_path, REPORTING_ROWS, "reporting.csv"))
+    )
     sale_ids = {r["sale_id"] for r in result}
     assert 1 in sale_ids
     assert 3 in sale_ids

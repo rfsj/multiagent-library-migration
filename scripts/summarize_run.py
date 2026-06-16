@@ -2,6 +2,7 @@
 
 Usage: python3 experiments/summarize_run.py <task_id> <prompt_label>
 """
+
 from __future__ import annotations
 
 import glob
@@ -49,7 +50,7 @@ def main() -> int:
         "prompt": prompt,
         "status": report.get("status"),
         "tests_after": report.get("tests_after"),
-        "accepted": f'{summ.get("accepted_steps", "?")}/{summ.get("planned_steps", "?")}',
+        "accepted": f"{summ.get('accepted_steps', '?')}/{summ.get('planned_steps', '?')}",
         "total_retries": report.get("total_retries"),
         "unmigrated_uses": report.get("unmigrated_uses"),
         "out_of_scope": report.get("out_of_scope_changes"),
@@ -63,10 +64,10 @@ def main() -> int:
     with out.open("a") as f:
         f.write(json.dumps(row) + "\n")
     print(
-        f'{prompt:>5} | {task_id:<32} | status={row["status"]:<8} '
-        f'tests={row["tests_after"]:<7} accepted={row["accepted"]:<5} '
-        f'retries={row["total_retries"]} plan={row["plan_chars"]}c '
-        f'layers={row["layers_active"]}'
+        f"{prompt:>5} | {task_id:<32} | status={row['status']:<8} "
+        f"tests={row['tests_after']:<7} accepted={row['accepted']:<5} "
+        f"retries={row['total_retries']} plan={row['plan_chars']}c "
+        f"layers={row['layers_active']}"
     )
     return 0
 

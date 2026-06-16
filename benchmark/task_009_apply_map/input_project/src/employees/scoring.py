@@ -8,7 +8,11 @@ def assign_grade(path):
     df["grade"] = df["score"].apply(
         lambda x: "A" if x >= 90 else ("B" if x >= 75 else ("C" if x >= 60 else "D"))
     )
-    return df[["employee_id", "score", "grade"]].sort_values("employee_id").reset_index(drop=True)
+    return (
+        df[["employee_id", "score", "grade"]]
+        .sort_values("employee_id")
+        .reset_index(drop=True)
+    )
 
 
 def map_department_name(path):
@@ -30,4 +34,8 @@ def map_department_name(path):
 def apply_bonus(path, rate=0.1):
     df = pd.read_csv(path)
     df["bonus"] = df["salary"].apply(lambda x: round(x * rate, 2))
-    return df[["employee_id", "salary", "bonus"]].sort_values("employee_id").reset_index(drop=True)
+    return (
+        df[["employee_id", "salary", "bonus"]]
+        .sort_values("employee_id")
+        .reset_index(drop=True)
+    )

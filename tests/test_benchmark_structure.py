@@ -32,9 +32,7 @@ def test_scanner_separates_source_and_test_pandas_usage(tmp_path):
     tests_dir.mkdir()
     (project_dir / "requirements.txt").write_text("pandas==2.2.3\n", encoding="utf-8")
     (source_dir / "processing.py").write_text(
-        "import pandas as pd\n\n"
-        "def load(path):\n"
-        "    return pd.read_csv(path)\n",
+        "import pandas as pd\n\ndef load(path):\n    return pd.read_csv(path)\n",
         encoding="utf-8",
     )
     (tests_dir / "test_processing.py").write_text(
@@ -178,7 +176,9 @@ def test_diagnosis_deduplicates_api_level_steps_before_symbol_split(tmp_path):
         ["summarize"],
         ["latest"],
     ]
-    assert any("Deduplicated 2 redundant migration step(s)" in warning for warning in warnings)
+    assert any(
+        "Deduplicated 2 redundant migration step(s)" in warning for warning in warnings
+    )
 
 
 def test_diagnosis_flow_analysis_keeps_coupled_files_at_file_level(tmp_path):
@@ -240,7 +240,10 @@ def test_diagnosis_flow_analysis_keeps_coupled_files_at_file_level(tmp_path):
 
     assert [step["file"] for step in steps] == ["src/loaders.py", "src/summaries.py"]
     assert [step["allowed_symbols"] for step in steps] == [[], []]
-    assert any("DataFrame flow analysis marked it as coupled" in warning for warning in warnings)
+    assert any(
+        "DataFrame flow analysis marked it as coupled" in warning
+        for warning in warnings
+    )
 
 
 def test_diagnosis_groups_cross_file_dataframe_flow_when_required(tmp_path):
@@ -304,7 +307,9 @@ def test_diagnosis_groups_cross_file_dataframe_flow_when_required(tmp_path):
     assert any("Grouped DataFrame flow files" in warning for warning in warnings)
 
 
-def test_diagnosis_flow_symbol_dependencies_keep_cross_file_consumers_at_file_level(tmp_path):
+def test_diagnosis_flow_symbol_dependencies_keep_cross_file_consumers_at_file_level(
+    tmp_path,
+):
     project_dir = tmp_path / "project"
     source_dir = project_dir / "src"
     source_dir.mkdir(parents=True)
@@ -385,4 +390,7 @@ def test_diagnosis_flow_symbol_dependencies_keep_cross_file_consumers_at_file_le
 
     assert [step["file"] for step in steps] == ["src/loaders.py", "src/summaries.py"]
     assert [step["allowed_symbols"] for step in steps] == [[], []]
-    assert any("DataFrame flow analysis marked it as coupled" in warning for warning in warnings)
+    assert any(
+        "DataFrame flow analysis marked it as coupled" in warning
+        for warning in warnings
+    )

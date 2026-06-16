@@ -16,7 +16,10 @@ from pydantic import BaseModel, Field
 from src.llm import get_llm
 from src.migration_config import MigrationConfig
 from src.tools.ast_transformer import apply_ast_transforms
-from src.tools.pattern_scanner import format_pattern_analysis, scan_for_confusing_patterns
+from src.tools.pattern_scanner import (
+    format_pattern_analysis,
+    scan_for_confusing_patterns,
+)
 
 load_dotenv()
 
@@ -152,8 +155,12 @@ def _few_shot_messages(include_plan: bool = True) -> list[Any]:
 
 class UnmigratedPattern(BaseModel):
     line: int = Field(default=0, description="Line number in the original file.")
-    api_call: str = Field(default="", description="Source-library API call that could not be migrated.")
-    reason: str = Field(default="", description="Why no target-library equivalent exists.")
+    api_call: str = Field(
+        default="", description="Source-library API call that could not be migrated."
+    )
+    reason: str = Field(
+        default="", description="Why no target-library equivalent exists."
+    )
 
 
 class MigrationResult(BaseModel):
@@ -223,8 +230,9 @@ class MigrationAgent:
         cfg = getattr(self, "_config", None)
         return cfg if cfg is not None else MigrationConfig.assisted()
 
-
-    def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
+    def run_step(
+        self, project_dir: Path, step: dict[str, Any], logs_dir: Path
+    ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
         self._current_unmigrated_patterns = []
         if step.get("files"):
@@ -249,7 +257,9 @@ class MigrationAgent:
             target.write_text(migrated, encoding="utf-8")
             changed_files.append(str(rel_file))
 
-        if rel_file.name != "requirements.txt" and "requirements.txt" in step.get("allowed_files", []):
+        if rel_file.name != "requirements.txt" and "requirements.txt" in step.get(
+            "allowed_files", []
+        ):
             if self._migrate_allowed_requirements(project_dir, step):
                 changed_files.append("requirements.txt")
 
@@ -282,7 +292,9 @@ class MigrationAgent:
     ) -> dict[str, Any]:
         # Phase 1: migrate all files without writing to disk yet.
         # This prevents partial state where A uses Polars but B still uses pandas.
-        pending: list[tuple[Path, str, str, str]] = []  # (path, original, migrated, rel_str)
+        pending: list[
+            tuple[Path, str, str, str]
+        ] = []  # (path, original, migrated, rel_str)
         file_results: list[dict[str, Any]] = []
 
         for rel_file_str in step.get("files", []):
@@ -303,12 +315,14 @@ class MigrationAgent:
                 step.get("retry_feedback"), rel_file_str
             )
 
-            migrated, file_attempts, file_error, file_pipeline = self._migrate_file_with_llm(
-                rel_file,
-                original,
-                file_step,
-                file_retry_feedback,
-                logs_dir,
+            migrated, file_attempts, file_error, file_pipeline = (
+                self._migrate_file_with_llm(
+                    rel_file,
+                    original,
+                    file_step,
+                    file_retry_feedback,
+                    logs_dir,
+                )
             )
             pending.append((target, original, migrated, rel_file_str))
             file_results.append(
@@ -408,8 +422,10 @@ class MigrationAgent:
 
         if cfg.use_rescan_retry:
             before_rescan = migrated
-            migrated, rescan_attempts, rescan_error = self._rescan_and_retry_if_patterns_remain(
-                rel_file, source, step, migrated, allowed_symbols
+            migrated, rescan_attempts, rescan_error = (
+                self._rescan_and_retry_if_patterns_remain(
+                    rel_file, source, step, migrated, allowed_symbols
+                )
             )
             total_attempts += rescan_attempts
             if migrated != before_rescan:
@@ -476,7 +492,9 @@ class MigrationAgent:
         phase: str = "initial",
     ) -> tuple[str, int, str]:
         allowed_symbols = step.get("allowed_symbols", [])
-        allowed_symbols_str = ", ".join(allowed_symbols) if allowed_symbols else "(all code in file)"
+        allowed_symbols_str = (
+            ", ".join(allowed_symbols) if allowed_symbols else "(all code in file)"
+        )
 
         retry_feedback_context = ""
         if retry_feedback:
@@ -515,7 +533,11 @@ class MigrationAgent:
                     ]
                 return migrated_code, attempt, ""
 
-        return source, MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS, "MigrationAgent returned no structured output."
+        return (
+            source,
+            MAX_MIGRATION_STRUCTURED_OUTPUT_ATTEMPTS,
+            "MigrationAgent returned no structured output.",
+        )
 
     def _apply_allowed_symbol_scope(
         self,
@@ -542,7 +564,9 @@ class MigrationAgent:
         migrated_lines = migrated.splitlines(keepends=True)
         replacements: list[tuple[int, int, str]] = []
         for node in original_tree.body:
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
                 continue
             if node.name not in allowed_symbols or not hasattr(node, "end_lineno"):
                 continue
@@ -577,7 +601,9 @@ class MigrationAgent:
         if rel_file.suffix != ".py":
             return migrated, 0, ""
         source_library = step.get("source_library", "pandas")
-        remaining = scan_for_confusing_patterns(migrated, source_library, allowed_symbols or None)
+        remaining = scan_for_confusing_patterns(
+            migrated, source_library, allowed_symbols or None
+        )
         if not remaining:
             return migrated, 0, ""
         migrated_lines = migrated.splitlines()
@@ -668,16 +694,12 @@ class MigrationAgent:
             )
         return result
 
-
-
     def _validate_python39_syntax(self, code: str) -> str | None:
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
             return f"Syntax error on line {e.lineno}: {e.msg}"
         return _check_pep604_union_types(tree)
-
-
 
     def _validate_step_scope(self, step: dict[str, Any], rel_file: Path) -> None:
         allowed_files = set(step.get("allowed_files", []))
@@ -687,7 +709,9 @@ class MigrationAgent:
                 "but that file is not listed in allowed_files."
             )
 
-    def _migrate_allowed_requirements(self, project_dir: Path, step: dict[str, Any]) -> bool:
+    def _migrate_allowed_requirements(
+        self, project_dir: Path, step: dict[str, Any]
+    ) -> bool:
         requirements = project_dir / "requirements.txt"
         if not requirements.exists():
             return False
@@ -698,8 +722,6 @@ class MigrationAgent:
         requirements.write_text(migrated, encoding="utf-8")
         return True
 
-
-
     def _migrate_requirements(self, source: str, step: dict[str, Any]) -> str:
         target_library = step.get("target_library")
         if not target_library:
@@ -707,7 +729,9 @@ class MigrationAgent:
                 f"Step {step['step_id']} targets requirements.txt, "
                 "but no target_library was provided by diagnosis."
             )
-        result = self._remove_package_from_requirements(source, step.get("source_library", ""))
+        result = self._remove_package_from_requirements(
+            source, step.get("source_library", "")
+        )
         if self._requirements_contains_package(result, target_library):
             return result
         suffix = "" if result.endswith("\n") else "\n"
@@ -728,7 +752,9 @@ class MigrationAgent:
             if not stripped or stripped.startswith("#") or stripped.startswith("-"):
                 filtered.append(line)
                 continue
-            match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", stripped)
+            match = re.match(
+                r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", stripped
+            )
             if match and _normalize_package_name(match.group("name")) == normalized:
                 continue
             filtered.append(line)
@@ -741,7 +767,10 @@ class MigrationAgent:
             if not line or line.startswith("#") or line.startswith("-"):
                 continue
             match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", line)
-            if match and _normalize_package_name(match.group("name")) == normalized_package:
+            if (
+                match
+                and _normalize_package_name(match.group("name")) == normalized_package
+            ):
                 return True
         return False
 
@@ -750,7 +779,9 @@ class MigrationAgent:
 
     def _resolve_hashed_requirement(self, package_name: str) -> str:
         return "\n".join(
-            self._resolve_hashed_requirement_blocks(package_name, version=None, seen=set())
+            self._resolve_hashed_requirement_blocks(
+                package_name, version=None, seen=set()
+            )
         )
 
     def _resolve_hashed_requirement_blocks(
@@ -767,11 +798,13 @@ class MigrationAgent:
         seen.add(normalized_key)
 
         files = metadata.get("releases", {}).get(version, metadata.get("urls", []))
-        hashes = sorted({
-            file_info.get("digests", {}).get("sha256")
-            for file_info in files
-            if file_info.get("digests", {}).get("sha256")
-        })
+        hashes = sorted(
+            {
+                file_info.get("digests", {}).get("sha256")
+                for file_info in files
+                if file_info.get("digests", {}).get("sha256")
+            }
+        )
         if not hashes:
             raise RuntimeError(
                 f"Could not resolve sha256 hashes for {package_name}=={version} from PyPI."
@@ -945,14 +978,12 @@ def _scoped_retry_feedback(
             **retry_feedback,
             "feedback_for_agent": (
                 f"You are migrating `{rel_file_str}`. "
-                "Focus only on what needs to change in this file.\n\n"
-                + original_text
+                "Focus only on what needs to change in this file.\n\n" + original_text
             ),
         }
     return (
         f"You are migrating `{rel_file_str}`. "
-        "Focus only on what needs to change in this file.\n\n"
-        + str(retry_feedback)
+        "Focus only on what needs to change in this file.\n\n" + str(retry_feedback)
     )
 
 

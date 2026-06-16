@@ -46,7 +46,12 @@ def _paths(tmp_path):
 
 def test_normalize_contacts_columns(tmp_path):
     c, _ = _paths(tmp_path)
-    assert _columns(normalize_contacts(c)) == ["contact_id", "full_name", "email", "phone_clean"]
+    assert _columns(normalize_contacts(c)) == [
+        "contact_id",
+        "full_name",
+        "email",
+        "phone_clean",
+    ]
 
 
 def test_normalize_contacts_email_lowercase(tmp_path):
@@ -71,7 +76,9 @@ def test_normalize_contacts_full_name(tmp_path):
 
 def test_normalize_contacts_phone_digits_only(tmp_path):
     c, _ = _paths(tmp_path)
-    result = {r["contact_id"]: r["phone_clean"] for r in _records(normalize_contacts(c))}
+    result = {
+        r["contact_id"]: r["phone_clean"] for r in _records(normalize_contacts(c))
+    }
     assert result["CO1"] == "15550001"
     assert result["CO2"] == "5550002"
     assert result["CO3"] == "5550003"
@@ -97,7 +104,10 @@ def test_find_by_domain_excludes_other(tmp_path):
 def test_recent_interactions_columns(tmp_path):
     c, i = _paths(tmp_path)
     assert _columns(recent_interactions(c, i)) == [
-        "interaction_id", "contact_name", "timestamp", "type"
+        "interaction_id",
+        "contact_name",
+        "timestamp",
+        "type",
     ]
 
 
@@ -115,7 +125,10 @@ def test_recent_interactions_includes_recent(tmp_path):
 
 def test_recent_interactions_contact_name(tmp_path):
     c, i = _paths(tmp_path)
-    result = {r["interaction_id"]: r["contact_name"] for r in _records(recent_interactions(c, i))}
+    result = {
+        r["interaction_id"]: r["contact_name"]
+        for r in _records(recent_interactions(c, i))
+    }
     assert result["I3"] == "Alice Smith"
     assert result["I5"] == "Bob Jones"
 
@@ -127,14 +140,18 @@ def test_interaction_summary_columns(tmp_path):
 
 def test_interaction_summary_october(tmp_path):
     _, i = _paths(tmp_path)
-    result = {(r["month"], r["type"]): r["count"] for r in _records(interaction_summary(i))}
+    result = {
+        (r["month"], r["type"]): r["count"] for r in _records(interaction_summary(i))
+    }
     assert result[("2024-10", "email")] == 1
     assert result[("2024-10", "call")] == 1
 
 
 def test_interaction_summary_november(tmp_path):
     _, i = _paths(tmp_path)
-    result = {(r["month"], r["type"]): r["count"] for r in _records(interaction_summary(i))}
+    result = {
+        (r["month"], r["type"]): r["count"] for r in _records(interaction_summary(i))
+    }
     assert result[("2024-11", "call")] == 1
     assert result[("2024-11", "email")] == 1
     assert result[("2024-11", "meeting")] == 1

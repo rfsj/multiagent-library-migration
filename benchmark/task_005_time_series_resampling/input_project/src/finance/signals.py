@@ -13,7 +13,9 @@ def load_signals(path: str | Path):
     signals["signal"] = signals["signal"].str.strip().str.lower()
     signals["confidence"] = signals["confidence"].fillna(0.0)
     signals = signals[signals["timestamp"].notna() & signals["symbol"].notna()].copy()
-    return signals.sort_values(["symbol", "timestamp", "signal_id"]).reset_index(drop=True)
+    return signals.sort_values(["symbol", "timestamp", "signal_id"]).reset_index(
+        drop=True
+    )
 
 
 def align_signals_to_prices(ticks_path: str | Path, signals_path: str | Path):
@@ -33,16 +35,30 @@ def align_signals_to_prices(ticks_path: str | Path, signals_path: str | Path):
     aligned["confidence"] = aligned["confidence"].fillna(0.0)
     aligned["score"] = aligned["daily_return"] * aligned["confidence"]
     aligned["score"] = aligned["score"].round(4)
-    return aligned[
-        ["symbol", "timestamp", "close", "daily_return", "signal", "confidence", "score"]
-    ].sort_values(["symbol", "timestamp"]).reset_index(drop=True)
+    return (
+        aligned[
+            [
+                "symbol",
+                "timestamp",
+                "close",
+                "daily_return",
+                "signal",
+                "confidence",
+                "score",
+            ]
+        ]
+        .sort_values(["symbol", "timestamp"])
+        .reset_index(drop=True)
+    )
 
 
 def signal_performance_summary(ticks_path: str | Path, signals_path: str | Path):
     aligned = align_signals_to_prices(ticks_path, signals_path)
     actionable = aligned[aligned["signal"].isin(["buy", "sell"])].copy()
     actionable["signed_return"] = actionable.apply(
-        lambda row: row["daily_return"] if row["signal"] == "buy" else -row["daily_return"],
+        lambda row: (
+            row["daily_return"] if row["signal"] == "buy" else -row["daily_return"]
+        ),
         axis=1,
     )
     result = (

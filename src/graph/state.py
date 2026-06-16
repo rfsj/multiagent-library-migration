@@ -52,7 +52,9 @@ class GraphState(TypedDict):
 def require_current_step(graph_state: GraphState) -> dict[str, Any]:
     step = graph_state["current_step"]
     if step is None:
-        raise RuntimeError("Migration graph expected a current step but none was selected.")
+        raise RuntimeError(
+            "Migration graph expected a current step but none was selected."
+        )
     return step
 
 
@@ -83,7 +85,9 @@ def to_graph_state(state: WorkflowState) -> GraphState:
     }
 
 
-def to_workflow_state(original: WorkflowState, graph_state: GraphState) -> WorkflowState:
+def to_workflow_state(
+    original: WorkflowState, graph_state: GraphState
+) -> WorkflowState:
     original.diagnosis = graph_state["diagnosis"]
     original.migrations = graph_state["migrations"]
     original.validations = graph_state["validations"]

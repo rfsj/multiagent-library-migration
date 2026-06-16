@@ -23,6 +23,7 @@ Usage:
 
 See ai_docs/proposal-failure-mining.md for the research rationale.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,14 @@ if str(ROOT) not in sys.path:
 from src.tools.source_api import detect_source_api
 
 # Ubiquitous constructors / IO that convert 1:1 and only add co-occurrence noise.
-_TRIVIAL = {"DataFrame", "Series", "read_csv", "read_json", "read_parquet", "read_excel"}
+_TRIVIAL = {
+    "DataFrame",
+    "Series",
+    "read_csv",
+    "read_json",
+    "read_parquet",
+    "read_excel",
+}
 
 
 def source_constructs(code: str, source_library: str, target_library: str) -> set[str]:
@@ -109,25 +117,28 @@ _CONSTRUCT_KEYWORDS: dict[str, tuple[str, ...]] = {
 def _implicated(construct: str, evidence: str) -> bool:
     keywords = _CONSTRUCT_KEYWORDS.get(construct)
     if not keywords:
-        keywords = tuple(tok for tok in construct.split("_") if len(tok) >= 4) or (construct,)
+        keywords = tuple(tok for tok in construct.split("_") if len(tok) >= 4) or (
+            construct,
+        )
     low = evidence.lower()
     return any(kw in low for kw in keywords)
 
 
 @dataclass
 class PatternStat:
-    raw_left: int = 0           # files where the LLM left this construct in raw output
+    raw_left: int = 0  # files where the LLM left this construct in raw output
     runs: set[str] = field(default_factory=set)
-    in_failed_run: int = 0      # of those, how many in a run that ended failed
-    fixed_by_ast: int = 0       # of those, how many where the AST layer changed the file
+    in_failed_run: int = 0  # of those, how many in a run that ended failed
+    fixed_by_ast: int = 0  # of those, how many where the AST layer changed the file
 
 
 @dataclass
 class WrongConvStat:
     """A construct present in the ORIGINAL, no longer residue in the raw output (so the
     LLM 'converted' it), yet the step still failed — a wrong-conversion suspect."""
-    failed_steps: int = 0       # broad: converted and co-occurred in a failed step
-    implicated: int = 0         # sharp: the failure text names this construct
+
+    failed_steps: int = 0  # broad: converted and co-occurred in a failed step
+    implicated: int = 0  # sharp: the failure text names this construct
     runs: set[str] = field(default_factory=set)
     error_classes: Counter = field(default_factory=Counter)
     example_rationale: str = ""
@@ -138,13 +149,17 @@ class ModelProfile:
     runs_analyzed: set[str] = field(default_factory=set)
     files_analyzed: int = 0
     files_with_raw_residue: int = 0
-    residue: dict[str, PatternStat] = field(default_factory=lambda: defaultdict(PatternStat))
+    residue: dict[str, PatternStat] = field(
+        default_factory=lambda: defaultdict(PatternStat)
+    )
     wrong_conversion: dict[str, WrongConvStat] = field(
         default_factory=lambda: defaultdict(WrongConvStat)
     )
 
 
-def iter_runs(runs_dir: Path, task_filter: str | None) -> Iterator[tuple[Path, dict[str, Any]]]:
+def iter_runs(
+    runs_dir: Path, task_filter: str | None
+) -> Iterator[tuple[Path, dict[str, Any]]]:
     for run_dir in sorted(runs_dir.iterdir()):
         report = _load_json(run_dir / "report.json")
         if report is None:
@@ -182,7 +197,9 @@ def iter_migrated_files(run_dir: Path) -> Iterator[tuple[str, dict[str, Any]]]:
 
 def _step_pipelines(migration_log: dict[str, Any]) -> list[dict[str, Any]]:
     if "file_results" in migration_log:
-        return [fr["pipeline"] for fr in migration_log["file_results"] if fr.get("pipeline")]
+        return [
+            fr["pipeline"] for fr in migration_log["file_results"] if fr.get("pipeline")
+        ]
     if migration_log.get("pipeline"):
         return [migration_log["pipeline"]]
     return []
@@ -202,7 +219,9 @@ def step_file_list(migration_log: dict[str, Any]) -> list[str]:
     return [single] if single else []
 
 
-def step_raw_residue(migration_log: dict[str, Any], source_library: str, target_library: str) -> set[str]:
+def step_raw_residue(
+    migration_log: dict[str, Any], source_library: str, target_library: str
+) -> set[str]:
     residue: set[str] = set()
     for pipeline in _step_pipelines(migration_log):
         raw = pipeline.get("raw_llm_code")
@@ -230,14 +249,20 @@ def mine_wrong_conversions(
         migration_log = _load_json(logs_dir / f"{step_id}_migration.json") or {}
         if not step_has_raw(migration_log):
             continue  # no raw capture → cannot separate converted from residue
-        files = step_file_list(migration_log) or ([failed["file"]] if failed.get("file") else [])
+        files = step_file_list(migration_log) or (
+            [failed["file"]] if failed.get("file") else []
+        )
 
         original_constructs: set[str] = set()
         for rel in files:
             orig_path = before_dir / rel
             if orig_path.suffix == ".py" and orig_path.is_file():
                 original_constructs.update(
-                    source_constructs(orig_path.read_text(encoding="utf-8"), source_library, target_library)
+                    source_constructs(
+                        orig_path.read_text(encoding="utf-8"),
+                        source_library,
+                        target_library,
+                    )
                 )
 
         converted_but_failed = original_constructs - step_raw_residue(
@@ -247,7 +272,11 @@ def mine_wrong_conversions(
             continue
 
         validation = _load_json(logs_dir / f"{step_id}_validation.json") or {}
-        evidence = (validation.get("pytest_feedback", "") or "") + " " + (failed.get("rationale", "") or "")
+        evidence = (
+            (validation.get("pytest_feedback", "") or "")
+            + " "
+            + (failed.get("rationale", "") or "")
+        )
         error_class = classify_error(evidence)
 
         for construct in converted_but_failed:
@@ -338,28 +367,42 @@ def to_json(profiles: dict[str, ModelProfile]) -> dict[str, Any]:
 
 def print_summary(profiles: dict[str, ModelProfile]) -> None:
     if not profiles:
-        print("Nenhum run com raw_llm_code encontrado. "
-              "Rode tasks após a instrumentação de captura do passe cru.")
+        print(
+            "Nenhum run com raw_llm_code encontrado. "
+            "Rode tasks após a instrumentação de captura do passe cru."
+        )
         return
     for model, p in profiles.items():
         print(f"\n=== {model} ===")
-        print(f"runs: {len(p.runs_analyzed)} | arquivos analisados: {p.files_analyzed} "
-              f"| com resíduo no passe cru: {p.files_with_raw_residue}")
+        print(
+            f"runs: {len(p.runs_analyzed)} | arquivos analisados: {p.files_analyzed} "
+            f"| com resíduo no passe cru: {p.files_with_raw_residue}"
+        )
 
         print("  [resíduo] construções que o LLM deixou SEM converter no passe cru:")
         if not p.residue:
             print("    (nenhuma)")
         else:
-            print(f"    {'construct':<24}{'raw_left':>9}{'runs':>6}{'failed':>8}{'ast?':>6}")
-            for name, s in sorted(p.residue.items(), key=lambda kv: kv[1].raw_left, reverse=True):
-                print(f"    {name:<24}{s.raw_left:>9}{len(s.runs):>6}{s.in_failed_run:>8}{s.fixed_by_ast:>6}")
+            print(
+                f"    {'construct':<24}{'raw_left':>9}{'runs':>6}{'failed':>8}{'ast?':>6}"
+            )
+            for name, s in sorted(
+                p.residue.items(), key=lambda kv: kv[1].raw_left, reverse=True
+            ):
+                print(
+                    f"    {name:<24}{s.raw_left:>9}{len(s.runs):>6}{s.in_failed_run:>8}{s.fixed_by_ast:>6}"
+                )
 
         print("  [conversão-errada] convertida (sem resíduo) mas o step falhou —")
-        print("    'implic.' = a falha NOMEIA a construção; 'co-ocorr.' = só estava no arquivo:")
+        print(
+            "    'implic.' = a falha NOMEIA a construção; 'co-ocorr.' = só estava no arquivo:"
+        )
         if not p.wrong_conversion:
             print("    (nenhuma)")
         else:
-            print(f"    {'construct':<24}{'implic.':>8}{'co-ocorr.':>10}{'runs':>6}  erros")
+            print(
+                f"    {'construct':<24}{'implic.':>8}{'co-ocorr.':>10}{'runs':>6}  erros"
+            )
             ordered = sorted(
                 p.wrong_conversion.items(),
                 key=lambda kv: (kv[1].implicated, kv[1].failed_steps),
@@ -367,14 +410,18 @@ def print_summary(profiles: dict[str, ModelProfile]) -> None:
             )
             for c, s in ordered:
                 errs = ", ".join(f"{e}×{n}" for e, n in s.error_classes.most_common(3))
-                print(f"    {c:<24}{s.implicated:>8}{s.failed_steps:>10}{len(s.runs):>6}  {errs}")
+                print(
+                    f"    {c:<24}{s.implicated:>8}{s.failed_steps:>10}{len(s.runs):>6}  {errs}"
+                )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs-dir", default=str(ROOT / "experiments" / "runs"))
     parser.add_argument("--task", default=None, help="Filtrar por task_id.")
-    parser.add_argument("--out", default=str(ROOT / "experiments" / "failure_profile.json"))
+    parser.add_argument(
+        "--out", default=str(ROOT / "experiments" / "failure_profile.json")
+    )
     args = parser.parse_args()
 
     runs_dir = Path(args.runs_dir)
@@ -387,7 +434,9 @@ def main() -> int:
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(to_json(profiles), indent=2, ensure_ascii=False), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(to_json(profiles), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"\nPerfil escrito em {out_path}")
     return 0
 

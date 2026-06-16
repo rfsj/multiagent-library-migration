@@ -36,7 +36,9 @@ def test_monthly_totals_columns(tmp_path):
 
 
 def test_monthly_totals_values(tmp_path):
-    result = {r["period"]: r["amount"] for r in _records(monthly_totals(_csv(tmp_path)))}
+    result = {
+        r["period"]: r["amount"] for r in _records(monthly_totals(_csv(tmp_path)))
+    }
     assert result["2024-01"] == 300
     assert result["2024-02"] == 450
     assert result["2024-03"] == 250
@@ -71,7 +73,10 @@ def test_quarterly_summary_sorted(tmp_path):
 
 def test_expanding_cumulative_columns(tmp_path):
     assert _columns(expanding_cumulative(_csv(tmp_path))) == [
-        "date", "amount", "cum_sum", "cum_mean"
+        "date",
+        "amount",
+        "cum_sum",
+        "cum_mean",
     ]
 
 

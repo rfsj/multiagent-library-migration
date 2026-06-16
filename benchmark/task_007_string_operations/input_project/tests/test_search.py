@@ -49,7 +49,11 @@ def test_search_by_keyword_sorted_by_name(tmp_path):
 
 
 def test_search_by_keyword_columns(tmp_path):
-    assert _cols(search_by_keyword(_csv(tmp_path), "blue")) == ["id", "name", "category"]
+    assert _cols(search_by_keyword(_csv(tmp_path), "blue")) == [
+        "id",
+        "name",
+        "category",
+    ]
 
 
 def test_search_by_keyword_no_match_returns_empty(tmp_path):

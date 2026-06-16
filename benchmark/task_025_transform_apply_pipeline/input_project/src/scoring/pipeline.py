@@ -28,9 +28,11 @@ def flag_anomalies(items_path, history_path):
     merged["cat_mean"] = merged.groupby("category")["sales"].transform("mean")
     merged["cat_std"] = merged.groupby("category")["sales"].transform("std").fillna(0)
     merged["is_anomaly"] = merged.apply(
-        lambda row: bool(abs(row["sales"] - row["cat_mean"]) > 2 * row["cat_std"])
-        if row["cat_std"] > 0
-        else False,
+        lambda row: (
+            bool(abs(row["sales"] - row["cat_mean"]) > 2 * row["cat_std"])
+            if row["cat_std"] > 0
+            else False
+        ),
         axis=1,
     )
     return (

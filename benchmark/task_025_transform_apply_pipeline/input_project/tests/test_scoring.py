@@ -67,9 +67,14 @@ def _history(tmp_path):
 
 # --- add_group_stats ---
 
+
 def test_group_stats_columns(tmp_path):
     assert _columns(add_group_stats(_feat(tmp_path))) == [
-        "item_id", "category", "value", "group_mean", "z_score"
+        "item_id",
+        "category",
+        "value",
+        "group_mean",
+        "z_score",
     ]
 
 
@@ -85,14 +90,18 @@ def test_group_stats_group_mean_a(tmp_path):
 
 
 def test_group_stats_z_score_a(tmp_path):
-    result = {r["item_id"]: r["z_score"] for r in _records(add_group_stats(_feat(tmp_path)))}
+    result = {
+        r["item_id"]: r["z_score"] for r in _records(add_group_stats(_feat(tmp_path)))
+    }
     assert result["IT1"] == 0.0
     assert result["IT2"] == 1.0
     assert result["IT3"] == -1.0
 
 
 def test_group_stats_z_score_b(tmp_path):
-    result = {r["item_id"]: r["z_score"] for r in _records(add_group_stats(_feat(tmp_path)))}
+    result = {
+        r["item_id"]: r["z_score"] for r in _records(add_group_stats(_feat(tmp_path)))
+    }
     assert result["IT4"] == -1.0
     assert result["IT5"] == 1.0
     assert result["IT6"] == 0.0
@@ -100,9 +109,14 @@ def test_group_stats_z_score_b(tmp_path):
 
 # --- add_rank_and_share ---
 
+
 def test_rank_and_share_columns(tmp_path):
     assert _columns(add_rank_and_share(_feat(tmp_path))) == [
-        "item_id", "category", "value", "rank", "share"
+        "item_id",
+        "category",
+        "value",
+        "rank",
+        "share",
     ]
 
 
@@ -111,14 +125,18 @@ def test_rank_and_share_row_count(tmp_path):
 
 
 def test_rank_a(tmp_path):
-    result = {r["item_id"]: r["rank"] for r in _records(add_rank_and_share(_feat(tmp_path)))}
+    result = {
+        r["item_id"]: r["rank"] for r in _records(add_rank_and_share(_feat(tmp_path)))
+    }
     assert result["IT2"] == 1
     assert result["IT1"] == 2
     assert result["IT3"] == 3
 
 
 def test_share_a(tmp_path):
-    result = {r["item_id"]: r["share"] for r in _records(add_rank_and_share(_feat(tmp_path)))}
+    result = {
+        r["item_id"]: r["share"] for r in _records(add_rank_and_share(_feat(tmp_path)))
+    }
     assert result["IT2"] == round(120 / 300, 4)
     assert result["IT1"] == round(100 / 300, 4)
     assert result["IT3"] == round(80 / 300, 4)
@@ -133,9 +151,14 @@ def test_share_sums_to_one_per_category(tmp_path):
 
 # --- enrich_with_history ---
 
+
 def test_enrich_columns(tmp_path):
     assert _columns(enrich_with_history(_items(tmp_path), _history(tmp_path))) == [
-        "item_id", "category", "period", "sales", "cum_sales"
+        "item_id",
+        "category",
+        "period",
+        "sales",
+        "cum_sales",
     ]
 
 
@@ -167,22 +190,31 @@ def test_enrich_cum_sales_i2(tmp_path):
 
 
 def test_enrich_category_joined(tmp_path):
-    result = {r["item_id"]: r["category"] for r in _records(enrich_with_history(_items(tmp_path), _history(tmp_path)))}
+    result = {
+        r["item_id"]: r["category"]
+        for r in _records(enrich_with_history(_items(tmp_path), _history(tmp_path)))
+    }
     assert result["I1"] == "electronics"
     assert result["I3"] == "tools"
 
 
 # --- flag_anomalies ---
 
+
 def test_flag_anomalies_columns(tmp_path):
     assert _columns(flag_anomalies(_items(tmp_path), _history(tmp_path))) == [
-        "item_id", "category", "date", "sales", "is_anomaly"
+        "item_id",
+        "category",
+        "date",
+        "sales",
+        "is_anomaly",
     ]
 
 
 def test_flag_anomalies_detects_spike(tmp_path):
     result = [
-        r for r in _records(flag_anomalies(_items(tmp_path), _history(tmp_path)))
+        r
+        for r in _records(flag_anomalies(_items(tmp_path), _history(tmp_path)))
         if r["item_id"] == "I2" and r["sales"] == 500
     ]
     assert len(result) == 1

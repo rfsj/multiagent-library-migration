@@ -16,6 +16,7 @@ def get_llm() -> BaseChatModel:
     model = os.environ["LLM_MODEL"]
 
     from src import llm_proxy  # noqa: PLC0415
+
     cb = llm_proxy.get_callback()
     callbacks = [cb] if cb else None
 
@@ -30,6 +31,5 @@ def get_llm() -> BaseChatModel:
         return ChatGoogleGenerativeAI(model=model, callbacks=callbacks)
 
     raise ValueError(
-        f"Unsupported LLM_PROVIDER '{provider}'. "
-        "Valid values: 'anthropic', 'google'."
+        f"Unsupported LLM_PROVIDER '{provider}'. Valid values: 'anthropic', 'google'."
     )

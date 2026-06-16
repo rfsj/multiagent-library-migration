@@ -39,52 +39,66 @@ def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == source_library:
-                        source_imports.append({
+                        source_imports.append(
+                            {
+                                "file": rel,
+                                "line": node.lineno,
+                                "alias": alias.asname,
+                                "is_test": is_test,
+                            }
+                        )
+            if isinstance(node, ast.ImportFrom):
+                if node.module == source_library or (node.module or "").startswith(
+                    f"{source_library}."
+                ):
+                    source_imports.append(
+                        {
                             "file": rel,
                             "line": node.lineno,
-                            "alias": alias.asname,
+                            "alias": None,
                             "is_test": is_test,
-                        })
-            if isinstance(node, ast.ImportFrom):
-                if node.module == source_library or (node.module or "").startswith(f"{source_library}."):
-                    source_imports.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "alias": None,
-                        "is_test": is_test,
-                    })
+                        }
+                    )
             if isinstance(node, ast.Call):
                 api = _classify_call(node, aliases)
                 if api:
-                    source_api_calls.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "api": api,
-                        "is_test": is_test,
-                    })
+                    source_api_calls.append(
+                        {
+                            "file": rel,
+                            "line": node.lineno,
+                            "api": api,
+                            "is_test": is_test,
+                        }
+                    )
             if isinstance(node, ast.Subscript):
                 api = _classify_subscript(node)
                 if api:
-                    source_api_calls.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "api": api,
-                        "is_test": is_test,
-                    })
+                    source_api_calls.append(
+                        {
+                            "file": rel,
+                            "line": node.lineno,
+                            "api": api,
+                            "is_test": is_test,
+                        }
+                    )
 
-    affected_files = sorted({item["file"] for item in source_imports + source_api_calls})
-    affected_source_files = sorted({
-        item["file"]
-        for item in source_imports + source_api_calls
-        if not item["is_test"]
-    })
-    test_files_with_source_library_usage = sorted({
-        item["file"]
-        for item in source_imports + source_api_calls
-        if item["is_test"]
-    })
+    affected_files = sorted(
+        {item["file"] for item in source_imports + source_api_calls}
+    )
+    affected_source_files = sorted(
+        {
+            item["file"]
+            for item in source_imports + source_api_calls
+            if not item["is_test"]
+        }
+    )
+    test_files_with_source_library_usage = sorted(
+        {item["file"] for item in source_imports + source_api_calls if item["is_test"]}
+    )
     source_imports_in_source = [item for item in source_imports if not item["is_test"]]
-    source_api_calls_in_source = [item for item in source_api_calls if not item["is_test"]]
+    source_api_calls_in_source = [
+        item for item in source_api_calls if not item["is_test"]
+    ]
     source_imports_in_tests = [item for item in source_imports if item["is_test"]]
     source_api_calls_in_tests = [item for item in source_api_calls if item["is_test"]]
     return {
@@ -103,7 +117,9 @@ def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
     }
 
 
-def build_project_audit(project_dir: Path, source_library: str, target_library: str) -> dict[str, Any]:
+def build_project_audit(
+    project_dir: Path, source_library: str, target_library: str
+) -> dict[str, Any]:
     scan = scan_project(project_dir, source_library)
     dependency_summary = _dependency_summary(
         scan["dependency_specs"],
@@ -120,7 +136,9 @@ def build_project_audit(project_dir: Path, source_library: str, target_library: 
         "test_files": scan["test_files"],
         "affected_files": scan["affected_files"],
         "affected_source_files": scan["affected_source_files"],
-        "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
+        "test_files_with_source_library_usage": scan[
+            "test_files_with_source_library_usage"
+        ],
         "source_import_count": len(scan["source_imports_in_source"]),
         "source_api_call_count": len(scan["source_api_calls_in_source"]),
         "test_import_count": len(scan["source_imports_in_tests"]),
@@ -129,7 +147,9 @@ def build_project_audit(project_dir: Path, source_library: str, target_library: 
         "source_api_calls_in_source": scan["source_api_calls_in_source"],
         "source_imports_in_tests": scan["source_imports_in_tests"],
         "source_api_calls_in_tests": scan["source_api_calls_in_tests"],
-        "migration_needed": bool(scan["source_imports_in_source"] or scan["source_api_calls_in_source"]),
+        "migration_needed": bool(
+            scan["source_imports_in_source"] or scan["source_api_calls_in_source"]
+        ),
         "test_usage_policy": (
             "Source-library usage in tests is recorded for audit, but tests are not migration targets."
         ),
@@ -155,7 +175,9 @@ def _is_test_file(rel_path: Path) -> bool:
     )
 
 
-def _dependency_specs(project_dir: Path, dependency_files: list[str]) -> dict[str, list[dict[str, str]]]:
+def _dependency_specs(
+    project_dir: Path, dependency_files: list[str]
+) -> dict[str, list[dict[str, str]]]:
     specs: dict[str, list[dict[str, str]]] = {}
     for rel_path in dependency_files:
         path = project_dir / rel_path
@@ -175,11 +197,13 @@ def _requirements_specs(path: Path) -> list[dict[str, str]]:
         match = re.match(r"(?P<name>[A-Za-z0-9_.-]+)\s*(?P<constraint>.*)", line)
         if not match:
             continue
-        specs.append({
-            "name": match.group("name"),
-            "constraint": match.group("constraint").strip(),
-            "raw": line,
-        })
+        specs.append(
+            {
+                "name": match.group("name"),
+                "constraint": match.group("constraint").strip(),
+                "raw": line,
+            }
+        )
     return specs
 
 
@@ -197,7 +221,9 @@ def _dependency_summary(
         "target_dependency_present": bool(target_specs),
         "source_dependency_specs": source_specs,
         "target_dependency_specs": target_specs,
-        "target_dependency_action": "preserve_existing" if target_specs else "add_dependency",
+        "target_dependency_action": "preserve_existing"
+        if target_specs
+        else "add_dependency",
     }
 
 

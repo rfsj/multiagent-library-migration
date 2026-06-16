@@ -35,11 +35,11 @@ def test_detect_finds_alias_specific_method_and_structural():
         "    return df.sort_values('y').reset_index(drop=True)\n"
     )
     names = {h.name for h in detect_source_api(code, "pandas", "polars")}
-    assert "read_csv" in names          # alias-qualified
-    assert "sort_values" in names       # source-specific method
+    assert "read_csv" in names  # alias-qualified
+    assert "sort_values" in names  # source-specific method
     assert "reset_index" in names
     assert "boolean_indexing" in names  # structural
-    assert "column_assign" in names     # structural
+    assert "column_assign" in names  # structural
 
 
 def test_generalist_catches_methods_absent_from_curated_catalog():

@@ -58,7 +58,12 @@ def _paths(tmp_path):
 
 def test_load_active_products_columns(tmp_path):
     p, _, _ = _paths(tmp_path)
-    assert _columns(load_active_products(p)) == ["product_id", "name", "category", "unit_price"]
+    assert _columns(load_active_products(p)) == [
+        "product_id",
+        "name",
+        "category",
+        "unit_price",
+    ]
 
 
 def test_load_active_products_excludes_inactive(tmp_path):
@@ -70,7 +75,11 @@ def test_load_active_products_excludes_inactive(tmp_path):
 
 def test_products_by_category_columns(tmp_path):
     p, _, _ = _paths(tmp_path)
-    assert _columns(products_by_category(p)) == ["category", "product_count", "avg_price"]
+    assert _columns(products_by_category(p)) == [
+        "category",
+        "product_count",
+        "avg_price",
+    ]
 
 
 def test_products_by_category_electronics(tmp_path):
@@ -104,7 +113,9 @@ def test_order_totals_values(tmp_path):
 def test_orders_by_customer_category_columns(tmp_path):
     p, o, _ = _paths(tmp_path)
     assert _columns(orders_by_customer_category(p, o)) == [
-        "customer_id", "category", "total_spent"
+        "customer_id",
+        "category",
+        "total_spent",
     ]
 
 

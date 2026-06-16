@@ -9,6 +9,7 @@ the source library but not on the target (so it cannot be a successful conversio
 It powers measurement that must stay library-agnostic and catalog-free (mine_failures;
 optionally the validation source-usage count). See ai_docs/proposal-failure-mining.md.
 """
+
 from __future__ import annotations
 
 import ast
@@ -78,7 +79,9 @@ def _generic_names() -> frozenset[str]:
 
 
 @lru_cache(maxsize=None)
-def source_specific_names(source_library: str, target_library: str = "polars") -> frozenset[str]:
+def source_specific_names(
+    source_library: str, target_library: str = "polars"
+) -> frozenset[str]:
     """Method/function names that exist on the source library but NOT on the target —
     i.e. their presence in migrated code means an unconverted source-ism."""
     return frozenset(
@@ -94,7 +97,9 @@ def _aliases(tree: ast.Module, source_library: str) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == source_library or alias.name.startswith(f"{source_library}."):
+                if alias.name == source_library or alias.name.startswith(
+                    f"{source_library}."
+                ):
                     aliases.add(alias.asname or alias.name.split(".")[0])
     return aliases
 
@@ -153,8 +158,13 @@ def _structural_hits(tree: ast.Module) -> list[ApiHit]:
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             s = node.slice
             is_col = isinstance(s, ast.Constant) and isinstance(s.value, str)
-            is_col_list = isinstance(s, ast.List) and bool(s.elts) and all(
-                isinstance(e, ast.Constant) and isinstance(e.value, str) for e in s.elts
+            is_col_list = (
+                isinstance(s, ast.List)
+                and bool(s.elts)
+                and all(
+                    isinstance(e, ast.Constant) and isinstance(e.value, str)
+                    for e in s.elts
+                )
             )
             if not is_col and not is_col_list:
                 hits.append(ApiHit(node.lineno, "boolean_indexing", "structural"))

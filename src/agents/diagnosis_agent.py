@@ -66,6 +66,7 @@ stage.
 # Output schema — v2
 # ---------------------------------------------------------------------------
 
+
 class ApiUsage(BaseModel):
     symbol: str = Field(default="")
     line: int = Field(default=0)
@@ -112,10 +113,16 @@ class StepDataFrameFlow(BaseModel):
 class MigrationStep(BaseModel):
     step_id: str = Field(description="Unique step identifier: step_001, step_002, ...")
     status: str = Field(default="planned")
-    step_type: str = Field(default="single_file", description="single_symbol | single_file | grouped")
+    step_type: str = Field(
+        default="single_file", description="single_symbol | single_file | grouped"
+    )
     file: str = Field(description="Primary file path relative to the repository root.")
-    files: list[str] = Field(default_factory=list, description="All files in this step.")
-    description: str = Field(description="Human-readable summary of the migration intent.")
+    files: list[str] = Field(
+        default_factory=list, description="All files in this step."
+    )
+    description: str = Field(
+        description="Human-readable summary of the migration intent."
+    )
     allowed_files: list[str] = Field(description="Files the MigrationAgent may modify.")
     allowed_symbols: list[str] = Field(default_factory=list)
     complexity: str = Field(default="low", description="low | medium | high")
@@ -203,6 +210,7 @@ class DiagnosisPlan(BaseModel):
 # Flow analysis schema (separate LLM call)
 # ---------------------------------------------------------------------------
 
+
 class DataFrameFlowSymbol(BaseModel):
     file: str = Field(description="File path relative to the repository root.")
     symbol: str = Field(description="Function or class name.")
@@ -253,30 +261,37 @@ class DataFrameFlowAnalysis(BaseModel):
 # Agent
 # ---------------------------------------------------------------------------
 
+
 class DiagnosisAgent:
     """LangChain-powered agent that identifies migration scope and builds the plan."""
 
     name = "diagnosis_agent"
 
     def __init__(self) -> None:
-        system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v2.md").read_text(encoding="utf-8")
+        system_prompt = (_PROMPTS_DIR / "diagnosis_agent_v2.md").read_text(
+            encoding="utf-8"
+        )
 
         raw_llm = get_llm()
         flow_llm = raw_llm.with_structured_output(DataFrameFlowAnalysis)
 
-        prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content=system_prompt),
-            ("human", _HUMAN_TEMPLATE),
-        ])
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                SystemMessage(content=system_prompt),
+                ("human", _HUMAN_TEMPLATE),
+            ]
+        )
         # Use StrOutputParser so we always get the raw text and parse manually.
         # with_structured_output returns None for complex schemas when the model
         # generates JSON text instead of a function call.
         self._chain = prompt | raw_llm | StrOutputParser()
 
-        flow_prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content=system_prompt),
-            ("human", _FLOW_HUMAN_TEMPLATE),
-        ])
+        flow_prompt = ChatPromptTemplate.from_messages(
+            [
+                SystemMessage(content=system_prompt),
+                ("human", _FLOW_HUMAN_TEMPLATE),
+            ]
+        )
         self._flow_chain = flow_prompt | flow_llm
         self._raw_flow_chain = flow_prompt | raw_llm | StrOutputParser()
 
@@ -292,12 +307,18 @@ class DiagnosisAgent:
         logs_dir.mkdir(parents=True, exist_ok=True)
         scan = scan_project(project_dir, source_library)
         audit = build_project_audit(project_dir, source_library, target_library)
-        audit_log_name = "project_audit.json" if replan_attempt == 0 else f"project_audit_replan_{replan_attempt}.json"
+        audit_log_name = (
+            "project_audit.json"
+            if replan_attempt == 0
+            else f"project_audit_replan_{replan_attempt}.json"
+        )
         (logs_dir / audit_log_name).write_text(
             json.dumps(audit, indent=2), encoding="utf-8"
         )
 
-        file_contents = self._collect_file_contents(project_dir, scan["affected_source_files"])
+        file_contents = self._collect_file_contents(
+            project_dir, scan["affected_source_files"]
+        )
         flow_payload = {
             "source_library": source_library,
             "target_library": target_library,
@@ -305,7 +326,9 @@ class DiagnosisAgent:
             "dependency_files": scan["dependency_files"],
             "affected_source_files": scan["affected_source_files"],
         }
-        dataframe_flow: Optional[DataFrameFlowAnalysis] = self._flow_chain.invoke(flow_payload)
+        dataframe_flow: Optional[DataFrameFlowAnalysis] = self._flow_chain.invoke(
+            flow_payload
+        )
         if dataframe_flow is None:
             # Fallback: parse raw text if function calling returned nothing
             raw_text: str = self._raw_flow_chain.invoke(flow_payload)
@@ -313,11 +336,19 @@ class DiagnosisAgent:
                 raw_text = raw_text.strip()
                 if raw_text.startswith("```"):
                     lines = raw_text.splitlines()
-                    raw_text = "\n".join(l for l in lines if not l.startswith("```")).strip()
-                dataframe_flow = DataFrameFlowAnalysis.model_validate(json.loads(raw_text))
+                    raw_text = "\n".join(
+                        l for l in lines if not l.startswith("```")
+                    ).strip()
+                dataframe_flow = DataFrameFlowAnalysis.model_validate(
+                    json.loads(raw_text)
+                )
             except Exception:
                 dataframe_flow = DataFrameFlowAnalysis()
-        flow_log_name = "dataframe_flow_analysis.json" if replan_attempt == 0 else f"dataframe_flow_analysis_replan_{replan_attempt}.json"
+        flow_log_name = (
+            "dataframe_flow_analysis.json"
+            if replan_attempt == 0
+            else f"dataframe_flow_analysis_replan_{replan_attempt}.json"
+        )
         dataframe_flow_payload = dataframe_flow.model_dump()
         (logs_dir / flow_log_name).write_text(
             json.dumps(dataframe_flow_payload, indent=2), encoding="utf-8"
@@ -331,12 +362,20 @@ class DiagnosisAgent:
                 "target_library": target_library,
                 "file_contents": file_contents,
                 "dependency_files": scan["dependency_files"],
-                "dependency_summary": json.dumps(audit["dependency_summary"], indent=2, sort_keys=True),
+                "dependency_summary": json.dumps(
+                    audit["dependency_summary"], indent=2, sort_keys=True
+                ),
                 "test_files": scan["test_files"],
                 "affected_source_files": scan["affected_source_files"],
-                "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
-                "dataframe_flow": json.dumps(dataframe_flow_payload, indent=2, sort_keys=True),
-                "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
+                "test_files_with_source_library_usage": scan[
+                    "test_files_with_source_library_usage"
+                ],
+                "dataframe_flow": json.dumps(
+                    dataframe_flow_payload, indent=2, sort_keys=True
+                ),
+                "replan_context": self._build_replan_context(
+                    replan_feedback, replan_attempt
+                ),
             },
         )
         migration_steps, planner_warnings = self._sanitize_migration_steps(
@@ -373,7 +412,9 @@ class DiagnosisAgent:
                 for af in (result.affected_files or [])
             ],
             "affected_source_files": scan["affected_source_files"],
-            "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
+            "test_files_with_source_library_usage": scan[
+                "test_files_with_source_library_usage"
+            ],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
             "dataframe_flow_analysis": dataframe_flow_payload,
@@ -386,15 +427,21 @@ class DiagnosisAgent:
             "unknowns": result.unknowns,
         }
         if result.research_metrics_support:
-            plan["research_metrics_support"] = result.research_metrics_support.model_dump()
+            plan["research_metrics_support"] = (
+                result.research_metrics_support.model_dump()
+            )
 
-        log_name = "diagnosis_plan.json" if replan_attempt == 0 else f"diagnosis_plan_replan_{replan_attempt}.json"
-        (logs_dir / log_name).write_text(
-            json.dumps(plan, indent=2), encoding="utf-8"
+        log_name = (
+            "diagnosis_plan.json"
+            if replan_attempt == 0
+            else f"diagnosis_plan_replan_{replan_attempt}.json"
         )
+        (logs_dir / log_name).write_text(json.dumps(plan, indent=2), encoding="utf-8")
         return plan
 
-    def _collect_file_contents(self, project_dir: Path, affected_files: list[str]) -> str:
+    def _collect_file_contents(
+        self, project_dir: Path, affected_files: list[str]
+    ) -> str:
         if not affected_files:
             return "(no affected files found)"
         parts = []
@@ -623,7 +670,9 @@ class DiagnosisAgent:
             split_steps[0]["allowed_files"].append("requirements.txt")
         return split_steps
 
-    def _build_replan_context(self, replan_feedback: dict[str, Any] | None, replan_attempt: int) -> str:
+    def _build_replan_context(
+        self, replan_feedback: dict[str, Any] | None, replan_attempt: int
+    ) -> str:
         if not replan_feedback:
             return ""
         return (
@@ -667,7 +716,9 @@ def _migratable_symbols(path: Path, source_library: str) -> list[str]:
 
     symbols = []
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _symbol_uses_dataframe_api(node, aliases):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and _symbol_uses_dataframe_api(node, aliases):
             symbols.append(node.name)
     return symbols
 
@@ -1007,9 +1058,8 @@ def _topological_symbol_order(
             reverse[dep].add(sym)
 
     from collections import deque
-    queue: deque[str] = deque(
-        sym for sym in symbols if in_degree[sym] == 0
-    )
+
+    queue: deque[str] = deque(sym for sym in symbols if in_degree[sym] == 0)
     result: list[str] = []
     while queue:
         sym = queue.popleft()
@@ -1062,12 +1112,17 @@ def _calls_local_symbol(node: ast.AST, symbol_names: set[str]) -> bool:
         if isinstance(child, ast.Call):
             if isinstance(child.func, ast.Name) and child.func.id in symbol_names:
                 return True
-            if isinstance(child.func, ast.Attribute) and child.func.attr in symbol_names:
+            if (
+                isinstance(child.func, ast.Attribute)
+                and child.func.attr in symbol_names
+            ):
                 return True
     return False
 
 
-def _class_has_multiple_dataframe_methods(node: ast.ClassDef, aliases: set[str]) -> bool:
+def _class_has_multiple_dataframe_methods(
+    node: ast.ClassDef, aliases: set[str]
+) -> bool:
     dataframe_methods = [
         child
         for child in node.body
@@ -1077,4 +1132,7 @@ def _class_has_multiple_dataframe_methods(node: ast.ClassDef, aliases: set[str])
     if len(dataframe_methods) <= 1:
         return False
     method_names = {method.name for method in dataframe_methods}
-    return any(_calls_local_symbol(method, method_names - {method.name}) for method in dataframe_methods)
+    return any(
+        _calls_local_symbol(method, method_names - {method.name})
+        for method in dataframe_methods
+    )

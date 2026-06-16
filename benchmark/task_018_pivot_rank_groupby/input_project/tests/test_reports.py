@@ -60,7 +60,11 @@ def test_sales_pivot_sorted_by_region(tmp_path):
 
 
 def test_top_product_per_region_columns(tmp_path):
-    assert _columns(top_product_per_region(_csv(tmp_path))) == ["region", "product", "amount"]
+    assert _columns(top_product_per_region(_csv(tmp_path))) == [
+        "region",
+        "product",
+        "amount",
+    ]
 
 
 def test_top_product_per_region_north(tmp_path):
@@ -82,7 +86,11 @@ def test_top_product_per_region_sorted(tmp_path):
 
 def test_region_category_stats_columns(tmp_path):
     assert _columns(region_category_stats(_csv(tmp_path))) == [
-        "region", "category", "total", "avg", "count"
+        "region",
+        "category",
+        "total",
+        "avg",
+        "count",
     ]
 
 

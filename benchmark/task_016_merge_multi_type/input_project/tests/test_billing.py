@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from billing.customers import active_customers, customers_with_invoices, customers_without_invoices
+from billing.customers import (
+    active_customers,
+    customers_with_invoices,
+    customers_without_invoices,
+)
 from billing.invoices import all_billing_pairs, invoice_totals_by_plan
 
 CUSTOMER_ROWS = [
@@ -66,7 +70,10 @@ def test_active_customers_includes_active(tmp_path):
 def test_customers_with_invoices_columns(tmp_path):
     c, i = _paths(tmp_path)
     assert _columns(customers_with_invoices(c, i)) == [
-        "customer_id", "name", "invoice_id", "amount"
+        "customer_id",
+        "name",
+        "invoice_id",
+        "amount",
     ]
 
 
@@ -80,7 +87,9 @@ def test_customers_with_invoices_inner_join(tmp_path):
 
 def test_customers_with_invoices_multiple_rows(tmp_path):
     c, i = _paths(tmp_path)
-    result = [r for r in _records(customers_with_invoices(c, i)) if r["customer_id"] == "C1"]
+    result = [
+        r for r in _records(customers_with_invoices(c, i)) if r["customer_id"] == "C1"
+    ]
     assert len(result) == 2
 
 
@@ -102,7 +111,9 @@ def test_invoice_totals_by_plan_columns(tmp_path):
 
 def test_invoice_totals_by_plan_values(tmp_path):
     c, i = _paths(tmp_path)
-    result = {r["plan"]: r["total_amount"] for r in _records(invoice_totals_by_plan(c, i))}
+    result = {
+        r["plan"]: r["total_amount"] for r in _records(invoice_totals_by_plan(c, i))
+    }
     assert result["premium"] == 300.0
     assert result["basic"] == 50.0
 

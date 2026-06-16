@@ -32,7 +32,10 @@ def _columns(frame):
 
 def test_region_share_columns(tmp_path):
     assert _columns(add_region_share(_csv(tmp_path))) == [
-        "sale_id", "region", "revenue", "share"
+        "sale_id",
+        "region",
+        "revenue",
+        "share",
     ]
 
 
@@ -63,7 +66,10 @@ def test_region_share_sums_to_one_per_region(tmp_path):
 
 def test_category_deviation_columns(tmp_path):
     assert _columns(add_category_deviation(_csv(tmp_path))) == [
-        "product_id", "category", "price", "deviation"
+        "product_id",
+        "category",
+        "price",
+        "deviation",
     ]
 
 
@@ -72,7 +78,10 @@ def test_category_deviation_row_count_preserved(tmp_path):
 
 
 def test_category_deviation_electronics(tmp_path):
-    result = {r["product_id"]: r["deviation"] for r in _records(add_category_deviation(_csv(tmp_path)))}
+    result = {
+        r["product_id"]: r["deviation"]
+        for r in _records(add_category_deviation(_csv(tmp_path)))
+    }
     cat_mean = round((50.0 + 60.0 + 45.0) / 3, 10)
     assert result["P1"] == round(50.0 - cat_mean, 2)
     assert result["P3"] == round(60.0 - cat_mean, 2)
@@ -80,14 +89,20 @@ def test_category_deviation_electronics(tmp_path):
 
 
 def test_category_deviation_tools(tmp_path):
-    result = {r["product_id"]: r["deviation"] for r in _records(add_category_deviation(_csv(tmp_path)))}
+    result = {
+        r["product_id"]: r["deviation"]
+        for r in _records(add_category_deviation(_csv(tmp_path)))
+    }
     assert result["P2"] == 2.5
     assert result["P5"] == -2.5
 
 
 def test_rank_within_group_columns(tmp_path):
     assert _columns(rank_within_group(_csv(tmp_path))) == [
-        "sale_id", "region", "revenue", "rank"
+        "sale_id",
+        "region",
+        "revenue",
+        "rank",
     ]
 
 

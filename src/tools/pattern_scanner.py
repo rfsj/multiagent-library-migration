@@ -54,11 +54,15 @@ def scan_for_confusing_patterns(
             hits.append(PatternHit(line=lineno, pattern_id=hit[0], guidance=hit[1]))
 
     # Detect sequential column assignments where one references the previous.
-    functions_to_scan = scoped_functions if scoped_functions is not None else [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
+    functions_to_scan = (
+        scoped_functions
+        if scoped_functions is not None
+        else [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+    )
     hits.extend(_detect_dependent_assignments(functions_to_scan))
 
     seen: set[tuple[int, str]] = set()
@@ -92,6 +96,7 @@ def format_pattern_analysis(hits: list[PatternHit]) -> str:
 # Internal matching logic
 # ---------------------------------------------------------------------------
 
+
 def _detect_dependent_assignments(
     functions: list[ast.FunctionDef | ast.AsyncFunctionDef],
 ) -> list[PatternHit]:
@@ -120,7 +125,8 @@ def _detect_dependent_assignments(
             slice_node = stmt.targets[0].slice
             col = (
                 slice_node.value
-                if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str)
+                if isinstance(slice_node, ast.Constant)
+                and isinstance(slice_node.value, str)
                 else None
             )
             if col is None:
@@ -141,7 +147,8 @@ def _detect_dependent_assignments(
             slice_node = stmt.targets[0].slice
             col = (
                 slice_node.value
-                if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str)
+                if isinstance(slice_node, ast.Constant)
+                and isinstance(slice_node.value, str)
                 else None
             )
             if col is None:
@@ -158,24 +165,27 @@ def _detect_dependent_assignments(
                     continue
                 ref_col = (
                     sub.slice.value
-                    if isinstance(sub.slice, ast.Constant) and isinstance(sub.slice.value, str)
+                    if isinstance(sub.slice, ast.Constant)
+                    and isinstance(sub.slice.value, str)
                     else None
                 )
                 if ref_col is None:
                     continue
                 created_lineno = created.get((var, ref_col))
                 if created_lineno is not None:
-                    hits.append(PatternHit(
-                        line=stmt.lineno,
-                        pattern_id="dependent_column_assign",
-                        guidance=(
-                            f'df["{col}"] references df["{ref_col}"] created on '
-                            f"line {created_lineno}. These CANNOT go in the same "
-                            f"with_columns() call — split into two sequential calls: "
-                            f"first with_columns([...alias('{ref_col}')]), "
-                            f"then with_columns([...alias('{col}')])."
-                        ),
-                    ))
+                    hits.append(
+                        PatternHit(
+                            line=stmt.lineno,
+                            pattern_id="dependent_column_assign",
+                            guidance=(
+                                f'df["{col}"] references df["{ref_col}"] created on '
+                                f"line {created_lineno}. These CANNOT go in the same "
+                                f"with_columns() call — split into two sequential calls: "
+                                f"first with_columns([...alias('{ref_col}')]), "
+                                f"then with_columns([...alias('{col}')])."
+                            ),
+                        )
+                    )
 
             # Register this column as created for subsequent statements
             created[(var, col)] = stmt.lineno
@@ -354,14 +364,22 @@ def _match(node: ast.AST) -> tuple[str, str] | None:
                 ".copy() has no equivalent and must be removed",
             )
 
-        elif attr == "strip" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "str":
+        elif (
+            attr == "strip"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "str"
+        ):
             return (
                 "str_strip",
                 ".str.strip() → .str.strip_chars(); "
                 "Polars has NO str.strip() — it does NOT exist; use .str.strip_chars() instead",
             )
 
-        elif attr == "contains" and isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "str":
+        elif (
+            attr == "contains"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "str"
+        ):
             # Check if case=False is passed (case-insensitive contains)
             has_case_false = any(
                 kw.arg == "case"

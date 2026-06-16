@@ -13,6 +13,7 @@ experiments/summary_<task>_<mode>_<timestamp>.json and printed.
 pass@k uses the unbiased estimator from Chen et al. (2021): with n samples and c
 correct, pass@k = 1 - C(n-c, k) / C(n, k).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -75,9 +76,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("task_id")
     parser.add_argument("--n", type=int, default=5, help="number of seeds (default 5)")
-    parser.add_argument("--k", type=int, default=None, help="k for pass@k (default = n)")
     parser.add_argument(
-        "--skip-install", action="store_true",
+        "--k", type=int, default=None, help="k for pass@k (default = n)"
+    )
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
         help="skip dependency install on every seed (default: install only on seed 1)",
     )
     args = parser.parse_args()
@@ -111,7 +115,7 @@ def main() -> int:
         "n_seeds": n,
         "k": k,
         "successes": succ,
-        "pass@1": round(succ / n, 3),                 # mean single-attempt success
+        "pass@1": round(succ / n, 3),  # mean single-attempt success
         f"pass@{k}": round(pass_at_k(n, succ, k), 3),  # at least one of k
         "tests_pass_rate": round(tests_ok / n, 3),
         "plan_fill_rate": round(plan_ok / n, 3),

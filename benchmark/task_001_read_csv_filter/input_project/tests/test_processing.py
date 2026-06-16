@@ -119,7 +119,9 @@ def test_order_queries_filter_project_and_sort(
         (get_high_priority_orders, ["order_id", "status", "region"]),
     ],
 )
-def test_order_queries_preserve_empty_result_schema(tmp_path: Path, reader, expected_columns):
+def test_order_queries_preserve_empty_result_schema(
+    tmp_path: Path, reader, expected_columns
+):
     csv_path = _write_orders_csv(
         tmp_path,
         [

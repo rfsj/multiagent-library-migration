@@ -42,7 +42,10 @@ def test_category_distribution_columns(tmp_path):
 
 
 def test_category_distribution_values(tmp_path):
-    result = {r["category"]: r["count"] for r in _records(category_distribution(_csv(tmp_path)))}
+    result = {
+        r["category"]: r["count"]
+        for r in _records(category_distribution(_csv(tmp_path)))
+    }
     assert result["gadgets"] == 4
     assert result["tools"] == 2
     assert result["appliances"] == 1
@@ -54,7 +57,11 @@ def test_category_distribution_sorted(tmp_path):
 
 
 def test_top_rated_products_columns(tmp_path):
-    assert _columns(top_rated_products(_csv(tmp_path))) == ["product_id", "name", "rating"]
+    assert _columns(top_rated_products(_csv(tmp_path))) == [
+        "product_id",
+        "name",
+        "rating",
+    ]
 
 
 def test_top_rated_products_n3(tmp_path):
@@ -73,7 +80,11 @@ def test_top_rated_products_n1(tmp_path):
 
 
 def test_lowest_rated_products_columns(tmp_path):
-    assert _columns(lowest_rated_products(_csv(tmp_path))) == ["product_id", "name", "rating"]
+    assert _columns(lowest_rated_products(_csv(tmp_path))) == [
+        "product_id",
+        "name",
+        "rating",
+    ]
 
 
 def test_lowest_rated_products_n2(tmp_path):
@@ -84,11 +95,17 @@ def test_lowest_rated_products_n2(tmp_path):
 
 
 def test_brand_unique_categories_columns(tmp_path):
-    assert _columns(brand_unique_categories(_csv(tmp_path))) == ["brand", "unique_categories"]
+    assert _columns(brand_unique_categories(_csv(tmp_path))) == [
+        "brand",
+        "unique_categories",
+    ]
 
 
 def test_brand_unique_categories_values(tmp_path):
-    result = {r["brand"]: r["unique_categories"] for r in _records(brand_unique_categories(_csv(tmp_path)))}
+    result = {
+        r["brand"]: r["unique_categories"]
+        for r in _records(brand_unique_categories(_csv(tmp_path)))
+    }
     assert result["Acme"] == 2
     assert result["Bolt"] == 1
     assert result["Delta"] == 2

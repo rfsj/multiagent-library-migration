@@ -27,9 +27,8 @@ def revenue_by_region(path: str | Path):
 def customer_lifetime_value(orders_path: str | Path, customers_path: str | Path):
     customers = load_customers(customers_path)
     paid = paid_orders(orders_path)
-    totals = (
-        paid.groupby("customer_id", as_index=False)
-        .agg(total_spend=("net_revenue", "sum"), paid_orders=("order_id", "nunique"))
+    totals = paid.groupby("customer_id", as_index=False).agg(
+        total_spend=("net_revenue", "sum"), paid_orders=("order_id", "nunique")
     )
     result = customers.merge(totals, on="customer_id", how="left")
     result["total_spend"] = result["total_spend"].fillna(0.0).round(2)

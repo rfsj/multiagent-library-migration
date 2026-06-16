@@ -6,7 +6,9 @@ import pandas as pd
 def invoice_totals_by_plan(customers_path, invoices_path):
     customers = pd.read_csv(customers_path)
     invoices = pd.read_csv(invoices_path)
-    merged = invoices.merge(customers[["customer_id", "plan"]], on="customer_id", how="left")
+    merged = invoices.merge(
+        customers[["customer_id", "plan"]], on="customer_id", how="left"
+    )
     return (
         merged.groupby("plan", as_index=False)["amount"]
         .sum()

@@ -16,14 +16,15 @@ class DiagnosisRunner(Protocol):
         target_library: str,
         replan_feedback: dict[str, Any] | None = None,
         replan_attempt: int = 0,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 def build_diagnosis_node(diagnosis_agent: DiagnosisRunner, logs_dir: Path):
     def diagnose(graph_state: GraphState) -> dict[str, Any]:
         replan_count = graph_state["replan_count"]
-        llm_proxy.set_label("diagnose" if not replan_count else f"replan_{replan_count}")
+        llm_proxy.set_label(
+            "diagnose" if not replan_count else f"replan_{replan_count}"
+        )
         diagnosis = diagnosis_agent.run(
             graph_state["project_dir"],
             logs_dir,

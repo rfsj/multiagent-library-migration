@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from finance.prices import daily_price_features, latest_close_by_symbol, load_ticks
-from finance.signals import align_signals_to_prices, load_signals, signal_performance_summary
+from finance.signals import (
+    align_signals_to_prices,
+    load_signals,
+    signal_performance_summary,
+)
 
 
 TICK_ROWS = [
@@ -44,16 +48,18 @@ def _records(frame):
 def _simplified_records(frame):
     simplified = []
     for record in _records(frame):
-        simplified.append({
-            key: (
-                value.strftime("%Y-%m-%d")
-                if hasattr(value, "strftime")
-                else round(value, 4)
-                if isinstance(value, float)
-                else value
-            )
-            for key, value in record.items()
-        })
+        simplified.append(
+            {
+                key: (
+                    value.strftime("%Y-%m-%d")
+                    if hasattr(value, "strftime")
+                    else round(value, 4)
+                    if isinstance(value, float)
+                    else value
+                )
+                for key, value in record.items()
+            }
+        )
     return simplified
 
 
@@ -184,12 +190,42 @@ def test_load_signals_normalizes_rows(tmp_path: Path):
 
     result = load_signals(signals_path)
 
-    assert _columns(result) == ["signal_id", "symbol", "timestamp", "signal", "confidence"]
+    assert _columns(result) == [
+        "signal_id",
+        "symbol",
+        "timestamp",
+        "signal",
+        "confidence",
+    ]
     assert _simplified_records(result) == [
-        {"signal_id": 1, "symbol": "AAA", "timestamp": "2024-12-31", "signal": "buy", "confidence": 0.5},
-        {"signal_id": 2, "symbol": "AAA", "timestamp": "2025-01-02", "signal": "sell", "confidence": 0.8},
-        {"signal_id": 3, "symbol": "BBB", "timestamp": "2025-01-01", "signal": "buy", "confidence": 0.0},
-        {"signal_id": 4, "symbol": "BBB", "timestamp": "2025-01-04", "signal": "sell", "confidence": 0.6},
+        {
+            "signal_id": 1,
+            "symbol": "AAA",
+            "timestamp": "2024-12-31",
+            "signal": "buy",
+            "confidence": 0.5,
+        },
+        {
+            "signal_id": 2,
+            "symbol": "AAA",
+            "timestamp": "2025-01-02",
+            "signal": "sell",
+            "confidence": 0.8,
+        },
+        {
+            "signal_id": 3,
+            "symbol": "BBB",
+            "timestamp": "2025-01-01",
+            "signal": "buy",
+            "confidence": 0.0,
+        },
+        {
+            "signal_id": 4,
+            "symbol": "BBB",
+            "timestamp": "2025-01-04",
+            "signal": "sell",
+            "confidence": 0.6,
+        },
     ]
 
 
@@ -209,14 +245,78 @@ def test_align_signals_to_prices_uses_asof_with_tolerance(tmp_path: Path):
         "score",
     ]
     assert _simplified_records(result) == [
-        {"symbol": "AAA", "timestamp": "2025-01-01", "close": 101.0, "daily_return": 0.0, "signal": "buy", "confidence": 0.5, "score": 0.0},
-        {"symbol": "AAA", "timestamp": "2025-01-02", "close": 103.0, "daily_return": 0.0198, "signal": "buy", "confidence": 0.5, "score": 0.0099},
-        {"symbol": "AAA", "timestamp": "2025-01-03", "close": 103.0, "daily_return": 0.0, "signal": "sell", "confidence": 0.8, "score": 0.0},
-        {"symbol": "AAA", "timestamp": "2025-01-04", "close": 107.0, "daily_return": 0.0388, "signal": "sell", "confidence": 0.8, "score": 0.031},
-        {"symbol": "BBB", "timestamp": "2025-01-01", "close": 50.0, "daily_return": 0.0, "signal": "hold", "confidence": 0.0, "score": 0.0},
-        {"symbol": "BBB", "timestamp": "2025-01-02", "close": 50.0, "daily_return": 0.0, "signal": "buy", "confidence": 0.0, "score": 0.0},
-        {"symbol": "BBB", "timestamp": "2025-01-03", "close": 49.0, "daily_return": -0.02, "signal": "buy", "confidence": 0.0, "score": -0.0},
-        {"symbol": "BBB", "timestamp": "2025-01-04", "close": 51.0, "daily_return": 0.0408, "signal": "hold", "confidence": 0.0, "score": 0.0},
+        {
+            "symbol": "AAA",
+            "timestamp": "2025-01-01",
+            "close": 101.0,
+            "daily_return": 0.0,
+            "signal": "buy",
+            "confidence": 0.5,
+            "score": 0.0,
+        },
+        {
+            "symbol": "AAA",
+            "timestamp": "2025-01-02",
+            "close": 103.0,
+            "daily_return": 0.0198,
+            "signal": "buy",
+            "confidence": 0.5,
+            "score": 0.0099,
+        },
+        {
+            "symbol": "AAA",
+            "timestamp": "2025-01-03",
+            "close": 103.0,
+            "daily_return": 0.0,
+            "signal": "sell",
+            "confidence": 0.8,
+            "score": 0.0,
+        },
+        {
+            "symbol": "AAA",
+            "timestamp": "2025-01-04",
+            "close": 107.0,
+            "daily_return": 0.0388,
+            "signal": "sell",
+            "confidence": 0.8,
+            "score": 0.031,
+        },
+        {
+            "symbol": "BBB",
+            "timestamp": "2025-01-01",
+            "close": 50.0,
+            "daily_return": 0.0,
+            "signal": "hold",
+            "confidence": 0.0,
+            "score": 0.0,
+        },
+        {
+            "symbol": "BBB",
+            "timestamp": "2025-01-02",
+            "close": 50.0,
+            "daily_return": 0.0,
+            "signal": "buy",
+            "confidence": 0.0,
+            "score": 0.0,
+        },
+        {
+            "symbol": "BBB",
+            "timestamp": "2025-01-03",
+            "close": 49.0,
+            "daily_return": -0.02,
+            "signal": "buy",
+            "confidence": 0.0,
+            "score": -0.0,
+        },
+        {
+            "symbol": "BBB",
+            "timestamp": "2025-01-04",
+            "close": 51.0,
+            "daily_return": 0.0408,
+            "signal": "hold",
+            "confidence": 0.0,
+            "score": 0.0,
+        },
     ]
 
 
@@ -227,7 +327,25 @@ def test_signal_performance_summary_groups_actionable_signals(tmp_path: Path):
     result = signal_performance_summary(ticks_path, signals_path)
 
     assert _simplified_records(result) == [
-        {"symbol": "AAA", "signal": "buy", "observations": 2, "average_score": 0.005, "total_signed_return": 0.0198},
-        {"symbol": "AAA", "signal": "sell", "observations": 2, "average_score": 0.0155, "total_signed_return": -0.0388},
-        {"symbol": "BBB", "signal": "buy", "observations": 2, "average_score": 0.0, "total_signed_return": -0.02},
+        {
+            "symbol": "AAA",
+            "signal": "buy",
+            "observations": 2,
+            "average_score": 0.005,
+            "total_signed_return": 0.0198,
+        },
+        {
+            "symbol": "AAA",
+            "signal": "sell",
+            "observations": 2,
+            "average_score": 0.0155,
+            "total_signed_return": -0.0388,
+        },
+        {
+            "symbol": "BBB",
+            "signal": "buy",
+            "observations": 2,
+            "average_score": 0.0,
+            "total_signed_return": -0.02,
+        },
     ]

@@ -12,7 +12,9 @@ def load_events(path: str | Path):
     events["channel"] = events["channel"].fillna("unknown").str.strip().str.lower()
     events["revenue"] = events["revenue"].fillna(0.0)
     events["is_purchase"] = events["event_name"] == "purchase"
-    return events.sort_values(["user_id", "event_time", "event_id"]).reset_index(drop=True)
+    return events.sort_values(["user_id", "event_time", "event_id"]).reset_index(
+        drop=True
+    )
 
 
 def load_users(path: str | Path):
@@ -26,4 +28,6 @@ def load_users(path: str | Path):
 def valid_events(path: str | Path):
     events = load_events(path)
     allowed = ["signup", "page_view", "purchase", "cancel"]
-    return events[events["event_time"].notna() & events["event_name"].isin(allowed)].copy()
+    return events[
+        events["event_time"].notna() & events["event_name"].isin(allowed)
+    ].copy()

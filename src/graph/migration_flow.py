@@ -9,8 +9,9 @@ from src.graph.state import GraphState, require_current_step
 
 
 class MigrationRunner(Protocol):
-    def run_step(self, project_dir: Path, step: dict[str, Any], logs_dir: Path) -> dict[str, Any]:
-        ...
+    def run_step(
+        self, project_dir: Path, step: dict[str, Any], logs_dir: Path
+    ) -> dict[str, Any]: ...
 
 
 def select_next_step(graph_state: GraphState) -> dict[str, Any]:
@@ -30,11 +31,17 @@ def select_next_step(graph_state: GraphState) -> dict[str, Any]:
     step["target_library"] = diagnosis.get("target_library")
     step["dataframe_flow_analysis"] = diagnosis.get("dataframe_flow_analysis", {})
     retry_feedback = graph_state["retry_counts"].get(step["step_id"])
-    if retry_feedback and graph_state["current_step"] and graph_state["current_step"].get("retry_feedback"):
+    if (
+        retry_feedback
+        and graph_state["current_step"]
+        and graph_state["current_step"].get("retry_feedback")
+    ):
         step["retry_feedback"] = graph_state["current_step"]["retry_feedback"]
     failed_files = {s["file"] for s in graph_state["failed_steps"] if s.get("file")}
     if failed_files:
-        upstream = _upstream_failed_files(step, failed_files, step["dataframe_flow_analysis"])
+        upstream = _upstream_failed_files(
+            step, failed_files, step["dataframe_flow_analysis"]
+        )
         if upstream:
             step["upstream_failed_files"] = upstream
     return {
@@ -76,7 +83,9 @@ def build_migration_node(migration_agent: MigrationRunner, logs_dir: Path):
     return migrate_step
 
 
-def route_after_selection(graph_state: GraphState) -> Literal["snapshot_before_step", "__end__"]:
+def route_after_selection(
+    graph_state: GraphState,
+) -> Literal["snapshot_before_step", "__end__"]:
     if graph_state["current_step"] is None:
         return "__end__"
     return "snapshot_before_step"
@@ -91,9 +100,7 @@ def _upstream_failed_files(
     step_files = set(step.get("files") or [step["file"]])
     symbols = dataframe_flow_analysis.get("symbols", [])
     symbol_to_file: dict[str, str] = {
-        s["symbol"]: s["file"]
-        for s in symbols
-        if s.get("symbol") and s.get("file")
+        s["symbol"]: s["file"] for s in symbols if s.get("symbol") and s.get("file")
     }
     producer_files: set[str] = set()
     for sym in symbols:

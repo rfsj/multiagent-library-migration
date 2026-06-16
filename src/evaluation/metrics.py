@@ -45,6 +45,8 @@ def build_metrics(
         "out_of_scope_changes": final_validation["out_of_scope_changes"],
         "total_retries": sum(retries.values()),
         "status": "success"
-        if tests_before["passed"] and tests_after["passed"] and final_validation["status"] == "approved"
+        if tests_before["passed"]
+        and tests_after["passed"]
+        and final_validation["status"] == "approved"
         else "failed",
     }
