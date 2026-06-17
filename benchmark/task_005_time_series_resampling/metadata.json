@@ -7,5 +7,67 @@
     "src/finance/prices.py",
     "src/finance/signals.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/finance/prices.py",
+      "src/finance/signals.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/finance/prices.py": [
+        "load_ticks",
+        "daily_price_features",
+        "latest_close_by_symbol"
+      ],
+      "src/finance/signals.py": [
+        "load_signals",
+        "align_signals_to_prices",
+        "signal_performance_summary"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/finance/prices.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/finance/signals.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

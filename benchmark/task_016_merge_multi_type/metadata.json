@@ -7,5 +7,66 @@
     "src/billing/customers.py",
     "src/billing/invoices.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/billing/customers.py",
+      "src/billing/invoices.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/billing/customers.py": [
+        "active_customers",
+        "customers_with_invoices",
+        "customers_without_invoices"
+      ],
+      "src/billing/invoices.py": [
+        "invoice_totals_by_plan",
+        "all_billing_pairs"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/billing/customers.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/billing/invoices.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

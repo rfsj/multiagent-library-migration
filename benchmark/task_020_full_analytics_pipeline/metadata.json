@@ -9,5 +9,87 @@
     "src/retail/aggregation.py",
     "src/retail/reporting.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/retail/aggregation.py",
+      "src/retail/enrichment.py",
+      "src/retail/ingestion.py",
+      "src/retail/reporting.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/retail/aggregation.py": [
+        "monthly_revenue_by_segment",
+        "rolling_revenue_trend"
+      ],
+      "src/retail/enrichment.py": [
+        "enrich_transactions",
+        "flag_high_value"
+      ],
+      "src/retail/ingestion.py": [
+        "load_transactions",
+        "load_customers"
+      ],
+      "src/retail/reporting.py": [
+        "category_sales_report",
+        "segment_category_pivot"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/retail/aggregation.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/retail/enrichment.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/retail/ingestion.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/retail/reporting.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

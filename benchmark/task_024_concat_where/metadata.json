@@ -2,9 +2,59 @@
   "task_id": "task_024_concat_where",
   "source_library": "pandas",
   "target_library": "polars",
-  "description": "Migrate pd.concat(axis=1) for horizontal combination of DataFrames, Series.where(condition, other) for value clamping (semantics: keep where True, replace where False), and pd.concat(axis=0) for vertical stacking — from pandas to Polars.",
+  "description": "Migrate pd.concat(axis=1) for horizontal combination of DataFrames, Series.where(condition, other) for value clamping (semantics: keep where True, replace where False), and pd.concat(axis=0) for vertical stacking \u2014 from pandas to Polars.",
   "expected_changed_files": [
     "src/pipeline/combine.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/pipeline/combine.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/pipeline/combine.py": [
+        "combine_survey_results",
+        "cap_values",
+        "stack_datasets"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/pipeline/combine.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

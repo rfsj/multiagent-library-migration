@@ -2,9 +2,59 @@
   "task_id": "task_023_period_expanding",
   "source_library": "pandas",
   "target_library": "polars",
-  "description": "Migrate dt.to_period('M') and dt.to_period('Q') for period-based groupby, and expanding().mean() / expanding().sum() for cumulative window statistics — neither exists directly in Polars (use strftime and cum_mean/cum_sum).",
+  "description": "Migrate dt.to_period('M') and dt.to_period('Q') for period-based groupby, and expanding().mean() / expanding().sum() for cumulative window statistics \u2014 neither exists directly in Polars (use strftime and cum_mean/cum_sum).",
   "expected_changed_files": [
     "src/metrics/timeseries.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/metrics/timeseries.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/metrics/timeseries.py": [
+        "monthly_totals",
+        "quarterly_summary",
+        "expanding_cumulative"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/metrics/timeseries.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

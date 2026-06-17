@@ -8,5 +8,76 @@
     "src/logistics/orders.py",
     "src/logistics/fulfillment.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/logistics/fulfillment.py",
+      "src/logistics/orders.py",
+      "src/logistics/products.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/logistics/fulfillment.py": [
+        "fulfillment_rate",
+        "pending_orders"
+      ],
+      "src/logistics/orders.py": [
+        "order_totals",
+        "orders_by_customer_category"
+      ],
+      "src/logistics/products.py": [
+        "load_active_products",
+        "products_by_category"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/logistics/fulfillment.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/logistics/orders.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/logistics/products.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

@@ -5,5 +5,53 @@
   "description": "GitHub project benchmark imported from https://github.com/Mottl/hurst.",
   "source_repo": "https://github.com/Mottl/hurst",
   "source_branch": null,
-  "expected_changed_files": []
+  "expected_changed_files": [],
+  "validity_oracle": {
+    "required_source_files": [
+      "hurst/__init__.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "hurst/__init__.py": [
+        "compute_Hc"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "hurst/__init__.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }
