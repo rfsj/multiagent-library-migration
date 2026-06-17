@@ -26,6 +26,7 @@ def _env_flag(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+
 _HUMAN_TEMPLATE = """\
 Analyze the project below and produce a migration plan from \
 {source_library} to {target_library}.
@@ -176,17 +177,21 @@ class PlannerV3Agent:
         llm = raw_llm.with_structured_output(PlannerV3Plan)
         analysis_llm = raw_llm.with_structured_output(PlannerV3SymbolAnalysisResult)
         self._chain = (
-            ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", _HUMAN_TEMPLATE),
-            ])
+            ChatPromptTemplate.from_messages(
+                [
+                    ("system", system_prompt),
+                    ("human", _HUMAN_TEMPLATE),
+                ]
+            )
             | llm
         )
         self._symbol_analysis_chain = (
-            ChatPromptTemplate.from_messages([
-                ("system", analysis_prompt),
-                ("human", _SYMBOL_ANALYSIS_TEMPLATE),
-            ])
+            ChatPromptTemplate.from_messages(
+                [
+                    ("system", analysis_prompt),
+                    ("human", _SYMBOL_ANALYSIS_TEMPLATE),
+                ]
+            )
             | analysis_llm
         )
 
@@ -223,25 +228,29 @@ class PlannerV3Agent:
             replan_attempt=replan_attempt,
         )
         symbol_analysis_payload = symbol_analysis.model_dump()
-        dataframe_flow_analysis = _build_dataframe_flow_analysis(symbol_analysis_payload)
+        dataframe_flow_analysis = _build_dataframe_flow_analysis(
+            symbol_analysis_payload
+        )
 
-        result: PlannerV3Plan = self._chain.invoke({
-            "source_library": source_library,
-            "target_library": target_library,
-            "file_contents": file_contents,
-            "dependency_files": scan["dependency_files"],
-            "test_files": scan["test_files"],
-            "affected_files": affected_source_files,
-            "symbol_analysis": json.dumps(
-                symbol_analysis_payload,
-                indent=2,
-                sort_keys=True,
-            ),
-            "replan_context": self._build_replan_context(
-                replan_feedback,
-                replan_attempt,
-            ),
-        })
+        result: PlannerV3Plan = self._chain.invoke(
+            {
+                "source_library": source_library,
+                "target_library": target_library,
+                "file_contents": file_contents,
+                "dependency_files": scan["dependency_files"],
+                "test_files": scan["test_files"],
+                "affected_files": affected_source_files,
+                "symbol_analysis": json.dumps(
+                    symbol_analysis_payload,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                "replan_context": self._build_replan_context(
+                    replan_feedback,
+                    replan_attempt,
+                ),
+            }
+        )
         if result is None:
             raise RuntimeError("PlannerV3Agent did not return a structured plan.")
 
@@ -273,14 +282,15 @@ class PlannerV3Agent:
                 result.related_tests,
                 scan["test_files"],
             ),
-            "complexity": _sanitize_complexity(result.complexity, affected_source_files),
+            "complexity": _sanitize_complexity(
+                result.complexity, affected_source_files
+            ),
             "symbol_analysis": symbol_analysis_payload,
             "dataframe_flow_analysis": dataframe_flow_analysis,
             "planner_warnings": warnings,
             "migration_steps": migration_steps,
             "human_review_required": any(
-                step.get("requires_human_review", False)
-                for step in migration_steps
+                step.get("requires_human_review", False) for step in migration_steps
             ),
             "human_review_reasons": _human_review_reasons(migration_steps),
         }
@@ -312,11 +322,15 @@ class PlannerV3Agent:
             self._write_symbol_analysis_log(logs_dir, result, replan_attempt)
             return result
 
-        result: PlannerV3SymbolAnalysisResult | None = self._symbol_analysis_chain.invoke({
-            "source_library": source_library,
-            "target_library": target_library,
-            "file_contents": file_contents,
-        })
+        result: PlannerV3SymbolAnalysisResult | None = (
+            self._symbol_analysis_chain.invoke(
+                {
+                    "source_library": source_library,
+                    "target_library": target_library,
+                    "file_contents": file_contents,
+                }
+            )
+        )
         if result is None:
             result = PlannerV3SymbolAnalysisResult(
                 notes=["Symbol analysis returned no structured output."]
@@ -340,7 +354,9 @@ class PlannerV3Agent:
             encoding="utf-8",
         )
 
-    def _collect_file_contents(self, project_dir: Path, affected_files: list[str]) -> str:
+    def _collect_file_contents(
+        self, project_dir: Path, affected_files: list[str]
+    ) -> str:
         if not affected_files:
             return "(no affected files found)"
         parts = []
@@ -399,9 +415,7 @@ class PlannerV3Agent:
                     rule="safe_relative_paths",
                     severity="error",
                     action="drop_step",
-                    message=(
-                        f"Dropped step {step_id} for unsafe path {rel_file!r}."
-                    ),
+                    message=(f"Dropped step {step_id} for unsafe path {rel_file!r}."),
                     step_id=step_id,
                     file=rel_file,
                 )
@@ -743,14 +757,16 @@ def _build_dataframe_flow_analysis(symbol_analysis: dict[str, Any]) -> dict[str,
                 for dep in symbol.get("consumes_dataframe_from", [])
                 if dep in symbol_to_file
             ]
-            flow_symbols.append({
-                "file": rel_file,
-                "symbol": name,
-                "role": _flow_role(symbol),
-                "returns_dataframe": bool(symbol.get("returns_dataframe_like")),
-                "consumes_dataframe_from": consumes_from,
-                "type_contract": "unknown",
-            })
+            flow_symbols.append(
+                {
+                    "file": rel_file,
+                    "symbol": name,
+                    "role": _flow_role(symbol),
+                    "returns_dataframe": bool(symbol.get("returns_dataframe_like")),
+                    "consumes_dataframe_from": consumes_from,
+                    "type_contract": "unknown",
+                }
+            )
             for dep in consumes_from:
                 producer_file = symbol_to_file.get(dep)
                 if producer_file and producer_file != rel_file:
@@ -764,7 +780,9 @@ def _build_dataframe_flow_analysis(symbol_analysis: dict[str, Any]) -> dict[str,
 
 
 def _flow_role(symbol: dict[str, Any]) -> str:
-    produces = bool(symbol.get("creates_dataframe_like") or symbol.get("returns_dataframe_like"))
+    produces = bool(
+        symbol.get("creates_dataframe_like") or symbol.get("returns_dataframe_like")
+    )
     consumes = bool(symbol.get("receives_dataframe_like"))
     if produces and consumes:
         return "transformer"
@@ -811,21 +829,27 @@ def _build_flow_groups(
     )
     for index, files in enumerate(sorted_clusters, start=1):
         file_set = set(files)
-        symbols_in_group = sorted({
-            entry["symbol"]
-            for entry in flow_symbols
-            if entry["file"] in file_set and entry["role"] != "unknown" and entry["symbol"]
-        })
-        groups.append({
-            "group_id": f"flow_group_{index:03d}",
-            "files": files,
-            "symbols": symbols_in_group,
-            "reason": (
-                "Symbol analysis found DataFrame-like values produced in one "
-                "of these files and consumed in another."
-            ),
-            "planning_strategy": "grouped_before_consumers",
-        })
+        symbols_in_group = sorted(
+            {
+                entry["symbol"]
+                for entry in flow_symbols
+                if entry["file"] in file_set
+                and entry["role"] != "unknown"
+                and entry["symbol"]
+            }
+        )
+        groups.append(
+            {
+                "group_id": f"flow_group_{index:03d}",
+                "files": files,
+                "symbols": symbols_in_group,
+                "reason": (
+                    "Symbol analysis found DataFrame-like values produced in one "
+                    "of these files and consumed in another."
+                ),
+                "planning_strategy": "grouped_before_consumers",
+            }
+        )
     return groups
 
 

@@ -38,7 +38,14 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from experiment_utils import ROOT, pass_at_k, pass_caret_k, print_json, utc_timestamp, write_json
+from experiment_utils import (
+    ROOT,
+    pass_at_k,
+    pass_caret_k,
+    print_json,
+    utc_timestamp,
+    write_json,
+)
 from run_evaluation_matrix import CONFIGS, _resolve_configs, _resolve_tasks
 
 RUN_LEVEL_COLUMNS = [
@@ -154,16 +161,20 @@ def main() -> int:
     k_values = _parse_k_values(args.k)
 
     if args.dry_run:
-        print(f"{len(config_names)} config(s) x {len(task_ids)} task(s) "
-              f"x {args.attempts} attempt(s) = "
-              f"{len(config_names) * len(task_ids) * args.attempts} planner-only run(s)")
+        print(
+            f"{len(config_names)} config(s) x {len(task_ids)} task(s) "
+            f"x {args.attempts} attempt(s) = "
+            f"{len(config_names) * len(task_ids) * args.attempts} planner-only run(s)"
+        )
         for config_name in config_names:
             for task_id in task_ids:
                 print(f"  [{config_name}] {task_id}")
         return 0
 
     started = time.perf_counter()
-    matrix_dir = ROOT / "experiments" / "evaluations" / f"planner_matrix_{utc_timestamp()}"
+    matrix_dir = (
+        ROOT / "experiments" / "evaluations" / f"planner_matrix_{utc_timestamp()}"
+    )
     matrix_dir.mkdir(parents=True, exist_ok=True)
 
     results: list[dict[str, Any]] = []
@@ -240,47 +251,57 @@ def _run_planner_only(task_id: str, config_name: str) -> dict[str, Any]:
 def _build_run_level_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for result in results:
-        rows.append({
-            "task_id": result.get("task_id"),
-            "config": result.get("config"),
-            "attempt": result.get("attempt"),
-            "valid_plan": result.get("valid_plan"),
-            "status": result.get("status"),
-            "plan_validity_score": result.get("plan_validity_score"),
-            "file_coverage_rate": result.get("file_coverage_rate"),
-            "affected_file_coverage_rate": result.get("affected_file_coverage_rate"),
-            "scope_precision_rate": result.get("scope_precision_rate"),
-            "symbol_coverage_rate": result.get("symbol_coverage_rate"),
-            "expected_step_coverage_rate": result.get("expected_step_coverage_rate"),
-            "dependency_update_required": result.get("dependency_update_required"),
-            "dependency_plan_valid": result.get("dependency_plan_valid"),
-            "step_order_valid": result.get("step_order_valid"),
-            "human_review_match": result.get("human_review_match"),
-            "granularity_valid": result.get("granularity_valid"),
-            "duplicate_step_scope_count": result.get("duplicate_step_scope_count"),
-            "missing_affected_source_files": ";".join(
-                result.get("missing_affected_source_files", []) or []
-            ),
-            "missing_allowed_source_files": ";".join(
-                result.get("missing_allowed_source_files", []) or []
-            ),
-            "unexpected_allowed_files": ";".join(
-                result.get("unexpected_allowed_files", []) or []
-            ),
-            "missing_required_symbols": _format_mapping(
-                result.get("missing_required_symbols", {}) or {}
-            ),
-            "plan_violations": _format_violations(
-                result.get("plan_violations", []) or []
-            ),
-            "migration_step_count": result.get("migration_step_count"),
-            "human_review_required": result.get("human_review_required"),
-            "affected_source_files": ";".join(result.get("affected_source_files", []) or []),
-            "llm_calls": (result.get("llm_calls") or {}).get("total"),
-            "duration_seconds": result.get("duration_seconds"),
-            "planner_warnings": " | ".join(result.get("planner_warnings", []) or []),
-            "run_dir": result.get("run_dir"),
-        })
+        rows.append(
+            {
+                "task_id": result.get("task_id"),
+                "config": result.get("config"),
+                "attempt": result.get("attempt"),
+                "valid_plan": result.get("valid_plan"),
+                "status": result.get("status"),
+                "plan_validity_score": result.get("plan_validity_score"),
+                "file_coverage_rate": result.get("file_coverage_rate"),
+                "affected_file_coverage_rate": result.get(
+                    "affected_file_coverage_rate"
+                ),
+                "scope_precision_rate": result.get("scope_precision_rate"),
+                "symbol_coverage_rate": result.get("symbol_coverage_rate"),
+                "expected_step_coverage_rate": result.get(
+                    "expected_step_coverage_rate"
+                ),
+                "dependency_update_required": result.get("dependency_update_required"),
+                "dependency_plan_valid": result.get("dependency_plan_valid"),
+                "step_order_valid": result.get("step_order_valid"),
+                "human_review_match": result.get("human_review_match"),
+                "granularity_valid": result.get("granularity_valid"),
+                "duplicate_step_scope_count": result.get("duplicate_step_scope_count"),
+                "missing_affected_source_files": ";".join(
+                    result.get("missing_affected_source_files", []) or []
+                ),
+                "missing_allowed_source_files": ";".join(
+                    result.get("missing_allowed_source_files", []) or []
+                ),
+                "unexpected_allowed_files": ";".join(
+                    result.get("unexpected_allowed_files", []) or []
+                ),
+                "missing_required_symbols": _format_mapping(
+                    result.get("missing_required_symbols", {}) or {}
+                ),
+                "plan_violations": _format_violations(
+                    result.get("plan_violations", []) or []
+                ),
+                "migration_step_count": result.get("migration_step_count"),
+                "human_review_required": result.get("human_review_required"),
+                "affected_source_files": ";".join(
+                    result.get("affected_source_files", []) or []
+                ),
+                "llm_calls": (result.get("llm_calls") or {}).get("total"),
+                "duration_seconds": result.get("duration_seconds"),
+                "planner_warnings": " | ".join(
+                    result.get("planner_warnings", []) or []
+                ),
+                "run_dir": result.get("run_dir"),
+            }
+        )
     return rows
 
 
@@ -294,20 +315,24 @@ def _build_pass_at_k_rows(
         planner_pass_at_k = pass_at_k(successes, k_values)
         planner_pass_caret_k = pass_caret_k(successes, k_values)
         cost = _cost_to_success(ordered)
-        rows.append({
-            "task_id": task_id,
-            "config": config_name,
-            "attempts": len(ordered),
-            "valid_plan_rate": _safe_mean([1.0 if value else 0.0 for value in successes]),
-            "planner_pass@1": planner_pass_at_k.get("pass@1"),
-            "planner_pass@3": planner_pass_at_k.get("pass@3"),
-            "planner_pass@5": planner_pass_at_k.get("pass@5"),
-            "planner_pass^1": planner_pass_caret_k.get("pass^1"),
-            "planner_pass^3": planner_pass_caret_k.get("pass^3"),
-            "planner_pass^5": planner_pass_caret_k.get("pass^5"),
-            "first_success_rank": cost["first_success_rank"],
-            "llm_calls_to_success": cost["llm_calls_to_first_success"],
-        })
+        rows.append(
+            {
+                "task_id": task_id,
+                "config": config_name,
+                "attempts": len(ordered),
+                "valid_plan_rate": _safe_mean(
+                    [1.0 if value else 0.0 for value in successes]
+                ),
+                "planner_pass@1": planner_pass_at_k.get("pass@1"),
+                "planner_pass@3": planner_pass_at_k.get("pass@3"),
+                "planner_pass@5": planner_pass_at_k.get("pass@5"),
+                "planner_pass^1": planner_pass_caret_k.get("pass^1"),
+                "planner_pass^3": planner_pass_caret_k.get("pass^3"),
+                "planner_pass^5": planner_pass_caret_k.get("pass^5"),
+                "first_success_rank": cost["first_success_rank"],
+                "llm_calls_to_success": cost["llm_calls_to_first_success"],
+            }
+        )
     return rows
 
 
@@ -392,48 +417,60 @@ def _build_ablation_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if item.get("duration_seconds") is not None
         ]
         tasks = {item.get("task_id") for item in items}
-        rows.append({
-            "config": config_name,
-            "tasks": len(tasks),
-            "attempts": len(items),
-            "valid_plan_rate": _safe_mean([1.0 if v else 0.0 for v in valid_plans]),
-            "planner_pass@3": _safe_mean([1.0 if v else 0.0 for v in planner_pass3_values]),
-            "planner_pass@5": _safe_mean([1.0 if v else 0.0 for v in planner_pass5_values]),
-            "avg_plan_validity_score": _safe_mean(validity_scores),
-            "file_coverage_rate": _safe_mean(file_coverage_values),
-            "symbol_coverage_rate": _safe_mean(symbol_coverage_values),
-            "expected_step_coverage_rate": _safe_mean(expected_step_coverage_values),
-            "scope_violation_rate": _safe_mean(
-                [1.0 if v else 0.0 for v in scope_violations]
-            ),
-            "dependency_plan_valid_rate": _safe_mean(
-                [1.0 if v else 0.0 for v in dependency_results]
-            ),
-            "step_order_valid_rate": _safe_mean(
-                [1.0 if v else 0.0 for v in step_order_results]
-            ),
-            "human_review_match_rate": _safe_mean(
-                [1.0 if v else 0.0 for v in human_review_matches]
-            ),
-            "granularity_valid_rate": _safe_mean(
-                [1.0 if v else 0.0 for v in granularity_results]
-            ),
-            "human_review_rate": _safe_mean([1.0 if v else 0.0 for v in human_review]),
-            "step_count_min": min(step_counts) if step_counts else None,
-            "step_count_max": max(step_counts) if step_counts else None,
-            "step_count_mean": _safe_mean(step_counts),
-            "avg_llm_calls": _safe_mean(llm_calls),
-            "avg_duration_seconds": _safe_mean(durations),
-        })
+        rows.append(
+            {
+                "config": config_name,
+                "tasks": len(tasks),
+                "attempts": len(items),
+                "valid_plan_rate": _safe_mean([1.0 if v else 0.0 for v in valid_plans]),
+                "planner_pass@3": _safe_mean(
+                    [1.0 if v else 0.0 for v in planner_pass3_values]
+                ),
+                "planner_pass@5": _safe_mean(
+                    [1.0 if v else 0.0 for v in planner_pass5_values]
+                ),
+                "avg_plan_validity_score": _safe_mean(validity_scores),
+                "file_coverage_rate": _safe_mean(file_coverage_values),
+                "symbol_coverage_rate": _safe_mean(symbol_coverage_values),
+                "expected_step_coverage_rate": _safe_mean(
+                    expected_step_coverage_values
+                ),
+                "scope_violation_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in scope_violations]
+                ),
+                "dependency_plan_valid_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in dependency_results]
+                ),
+                "step_order_valid_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in step_order_results]
+                ),
+                "human_review_match_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in human_review_matches]
+                ),
+                "granularity_valid_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in granularity_results]
+                ),
+                "human_review_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in human_review]
+                ),
+                "step_count_min": min(step_counts) if step_counts else None,
+                "step_count_max": max(step_counts) if step_counts else None,
+                "step_count_mean": _safe_mean(step_counts),
+                "avg_llm_calls": _safe_mean(llm_calls),
+                "avg_duration_seconds": _safe_mean(durations),
+            }
+        )
     return rows
 
 
 def _group_by_config_task(
-    results: list[dict[str, Any]]
+    results: list[dict[str, Any]],
 ) -> dict[tuple[str | None, str | None], list[dict[str, Any]]]:
     grouped: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}
     for result in results:
-        grouped.setdefault((result.get("config"), result.get("task_id")), []).append(result)
+        grouped.setdefault((result.get("config"), result.get("task_id")), []).append(
+            result
+        )
     return grouped
 
 
@@ -459,8 +496,7 @@ def _parse_k_values(raw: str) -> list[int]:
 
 def _format_mapping(value: dict[str, list[str]]) -> str:
     return " | ".join(
-        f"{key}:{','.join(items)}"
-        for key, items in sorted(value.items())
+        f"{key}:{','.join(items)}" for key, items in sorted(value.items())
     )
 
 

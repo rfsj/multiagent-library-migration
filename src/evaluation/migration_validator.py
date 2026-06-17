@@ -108,9 +108,13 @@ def validate_migration_result(
     }
 
 
-def _migration_oracle(metadata: dict[str, Any], diagnosis: dict[str, Any]) -> dict[str, Any]:
+def _migration_oracle(
+    metadata: dict[str, Any], diagnosis: dict[str, Any]
+) -> dict[str, Any]:
     explicit = metadata.get("migration_oracle") or {}
-    planner_oracle = metadata.get("validity_oracle") or metadata.get("expected_planner") or {}
+    planner_oracle = (
+        metadata.get("validity_oracle") or metadata.get("expected_planner") or {}
+    )
 
     affected = _as_list(planner_oracle.get("affected_source_files"))
     allowed_source = _as_list(planner_oracle.get("allowed_source_files")) or affected
@@ -119,7 +123,9 @@ def _migration_oracle(metadata: dict[str, Any], diagnosis: dict[str, Any]) -> di
 
     allowed_changed = _as_list(explicit.get("allowed_changed_files"))
     if not allowed_changed:
-        allowed_changed = sorted(set(allowed_source) | set(allowed_dependency) | set(diagnosis_allowed))
+        allowed_changed = sorted(
+            set(allowed_source) | set(allowed_dependency) | set(diagnosis_allowed)
+        )
 
     required_changed = _as_list(explicit.get("required_changed_files"))
     if not required_changed:
@@ -134,7 +140,9 @@ def _migration_oracle(metadata: dict[str, Any], diagnosis: dict[str, Any]) -> di
         "allowed_changed_files": sorted(set(allowed_changed)),
         "required_changed_files": sorted(set(required_changed)),
         "required_target_usage_files": sorted(set(required_target_usage)),
-        "forbidden_changed_files": sorted(set(_as_list(explicit.get("forbidden_changed_files")))),
+        "forbidden_changed_files": sorted(
+            set(_as_list(explicit.get("forbidden_changed_files")))
+        ),
     }
 
 

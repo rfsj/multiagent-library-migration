@@ -23,7 +23,14 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from experiment_utils import ROOT, pass_at_k, pass_caret_k, print_json, utc_timestamp, write_json
+from experiment_utils import (
+    ROOT,
+    pass_at_k,
+    pass_caret_k,
+    print_json,
+    utc_timestamp,
+    write_json,
+)
 from run_evaluation_matrix import CONFIGS
 
 RUN_LEVEL_COLUMNS = [
@@ -109,11 +116,15 @@ def main() -> int:
     if args.dry_run:
         print(f"{len(selected)} migration-only run(s)")
         for row in selected:
-            print(f"  [{row['config']}] {row['task_id']} attempt={row['attempt']} {row['diagnosis_plan']}")
+            print(
+                f"  [{row['config']}] {row['task_id']} attempt={row['attempt']} {row['diagnosis_plan']}"
+            )
         return 0
 
     started = time.perf_counter()
-    matrix_dir = ROOT / "experiments" / "evaluations" / f"migration_matrix_{utc_timestamp()}"
+    matrix_dir = (
+        ROOT / "experiments" / "evaluations" / f"migration_matrix_{utc_timestamp()}"
+    )
     matrix_dir.mkdir(parents=True, exist_ok=True)
     k_values = _parse_k_values(args.k)
 
@@ -173,17 +184,21 @@ def _load_planner_rows(planner_matrix: Path, only_valid: bool) -> list[dict[str,
             diagnosis_plan = Path(run_dir) / "logs" / "diagnosis_plan.json"
             if not diagnosis_plan.exists():
                 continue
-            rows.append({
-                "task_id": row["task_id"],
-                "config": row["config"],
-                "attempt": row["attempt"],
-                "planner_run_dir": run_dir,
-                "diagnosis_plan": str(diagnosis_plan),
-            })
+            rows.append(
+                {
+                    "task_id": row["task_id"],
+                    "config": row["config"],
+                    "attempt": row["attempt"],
+                    "planner_run_dir": run_dir,
+                    "diagnosis_plan": str(diagnosis_plan),
+                }
+            )
     return rows
 
 
-def _run_migration_only(task_id: str, diagnosis_plan: Path, config: str) -> dict[str, Any]:
+def _run_migration_only(
+    task_id: str, diagnosis_plan: Path, config: str
+) -> dict[str, Any]:
     cmd = [
         sys.executable,
         str(ROOT / "scripts" / "eval_migration_only.py"),
@@ -227,29 +242,35 @@ def _build_run_level_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]
     rows = []
     for result in results:
         metrics = result.get("migration_metrics") or {}
-        rows.append({
-            "task_id": result.get("task_id"),
-            "config": result.get("config"),
-            "attempt": result.get("attempt"),
-            "migration_success": metrics.get("migration_success"),
-            "status": result.get("status"),
-            "behavior_preserved": metrics.get("behavior_preserved"),
-            "final_validation_approved": metrics.get("final_validation_approved"),
-            "source_usage_removed": metrics.get("source_usage_removed"),
-            "old_imports_remaining": metrics.get("old_imports_remaining"),
-            "unmigrated_uses": metrics.get("unmigrated_uses"),
-            "target_usage_added": metrics.get("target_usage_added"),
-            "scope_compliance": metrics.get("scope_compliance"),
-            "out_of_scope_changes": metrics.get("out_of_scope_changes"),
-            "missing_required_changed_files": ";".join(metrics.get("missing_required_changed_files") or []),
-            "missing_target_usage_files": ";".join(metrics.get("missing_target_usage_files") or []),
-            "diff_line_count": metrics.get("diff_line_count"),
-            "violations": ";".join(metrics.get("violations") or []),
-            "llm_calls": (result.get("llm_calls") or {}).get("total"),
-            "duration_seconds": result.get("duration_seconds"),
-            "run_dir": result.get("run_dir"),
-            "diagnosis_plan": result.get("input_diagnosis_plan"),
-        })
+        rows.append(
+            {
+                "task_id": result.get("task_id"),
+                "config": result.get("config"),
+                "attempt": result.get("attempt"),
+                "migration_success": metrics.get("migration_success"),
+                "status": result.get("status"),
+                "behavior_preserved": metrics.get("behavior_preserved"),
+                "final_validation_approved": metrics.get("final_validation_approved"),
+                "source_usage_removed": metrics.get("source_usage_removed"),
+                "old_imports_remaining": metrics.get("old_imports_remaining"),
+                "unmigrated_uses": metrics.get("unmigrated_uses"),
+                "target_usage_added": metrics.get("target_usage_added"),
+                "scope_compliance": metrics.get("scope_compliance"),
+                "out_of_scope_changes": metrics.get("out_of_scope_changes"),
+                "missing_required_changed_files": ";".join(
+                    metrics.get("missing_required_changed_files") or []
+                ),
+                "missing_target_usage_files": ";".join(
+                    metrics.get("missing_target_usage_files") or []
+                ),
+                "diff_line_count": metrics.get("diff_line_count"),
+                "violations": ";".join(metrics.get("violations") or []),
+                "llm_calls": (result.get("llm_calls") or {}).get("total"),
+                "duration_seconds": result.get("duration_seconds"),
+                "run_dir": result.get("run_dir"),
+                "diagnosis_plan": result.get("input_diagnosis_plan"),
+            }
+        )
     return rows
 
 
@@ -266,20 +287,24 @@ def _build_pass_at_k_rows(
         p_at_k = pass_at_k(successes, k_values)
         p_caret_k = pass_caret_k(successes, k_values)
         cost = _cost_to_success(ordered)
-        rows.append({
-            "task_id": task_id,
-            "config": config,
-            "attempts": len(ordered),
-            "migration_success_rate": _safe_mean([1.0 if s else 0.0 for s in successes]),
-            "migration_pass@1": p_at_k.get("pass@1"),
-            "migration_pass@3": p_at_k.get("pass@3"),
-            "migration_pass@5": p_at_k.get("pass@5"),
-            "migration_pass^1": p_caret_k.get("pass^1"),
-            "migration_pass^3": p_caret_k.get("pass^3"),
-            "migration_pass^5": p_caret_k.get("pass^5"),
-            "first_success_rank": cost["first_success_rank"],
-            "llm_calls_to_success": cost["llm_calls_to_first_success"],
-        })
+        rows.append(
+            {
+                "task_id": task_id,
+                "config": config,
+                "attempts": len(ordered),
+                "migration_success_rate": _safe_mean(
+                    [1.0 if s else 0.0 for s in successes]
+                ),
+                "migration_pass@1": p_at_k.get("pass@1"),
+                "migration_pass@3": p_at_k.get("pass@3"),
+                "migration_pass@5": p_at_k.get("pass@5"),
+                "migration_pass^1": p_caret_k.get("pass^1"),
+                "migration_pass^3": p_caret_k.get("pass^3"),
+                "migration_pass^5": p_caret_k.get("pass^5"),
+                "first_success_rank": cost["first_success_rank"],
+                "llm_calls_to_success": cost["llm_calls_to_first_success"],
+            }
+        )
     return rows
 
 
@@ -291,28 +316,66 @@ def _build_ablation_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for config, items in by_config.items():
         pass_rows = _build_pass_at_k_rows(items, [3, 5])
         metrics = [item.get("migration_metrics") or {} for item in items]
-        rows.append({
-            "config": config,
-            "tasks": len({item.get("task_id") for item in items}),
-            "attempts": len(items),
-            "migration_success_rate": _mean_bool(metrics, "migration_success"),
-            "migration_pass@3": _safe_mean([1.0 if row.get("migration_pass@3") else 0.0 for row in pass_rows if row.get("migration_pass@3") is not None]),
-            "migration_pass@5": _safe_mean([1.0 if row.get("migration_pass@5") else 0.0 for row in pass_rows if row.get("migration_pass@5") is not None]),
-            "behavior_preservation_rate": _mean_bool(metrics, "behavior_preserved"),
-            "scope_compliance_rate": _mean_bool(metrics, "scope_compliance"),
-            "source_usage_removed_rate": _mean_bool(metrics, "source_usage_removed"),
-            "target_usage_added_rate": _mean_bool(metrics, "target_usage_added"),
-            "avg_diff_line_count": _safe_mean([m.get("diff_line_count") for m in metrics if m.get("diff_line_count") is not None]),
-            "avg_llm_calls": _safe_mean([(item.get("llm_calls") or {}).get("total") for item in items if (item.get("llm_calls") or {}).get("total") is not None]),
-            "avg_duration_seconds": _safe_mean([item.get("duration_seconds") for item in items if item.get("duration_seconds") is not None]),
-        })
+        rows.append(
+            {
+                "config": config,
+                "tasks": len({item.get("task_id") for item in items}),
+                "attempts": len(items),
+                "migration_success_rate": _mean_bool(metrics, "migration_success"),
+                "migration_pass@3": _safe_mean(
+                    [
+                        1.0 if row.get("migration_pass@3") else 0.0
+                        for row in pass_rows
+                        if row.get("migration_pass@3") is not None
+                    ]
+                ),
+                "migration_pass@5": _safe_mean(
+                    [
+                        1.0 if row.get("migration_pass@5") else 0.0
+                        for row in pass_rows
+                        if row.get("migration_pass@5") is not None
+                    ]
+                ),
+                "behavior_preservation_rate": _mean_bool(metrics, "behavior_preserved"),
+                "scope_compliance_rate": _mean_bool(metrics, "scope_compliance"),
+                "source_usage_removed_rate": _mean_bool(
+                    metrics, "source_usage_removed"
+                ),
+                "target_usage_added_rate": _mean_bool(metrics, "target_usage_added"),
+                "avg_diff_line_count": _safe_mean(
+                    [
+                        m.get("diff_line_count")
+                        for m in metrics
+                        if m.get("diff_line_count") is not None
+                    ]
+                ),
+                "avg_llm_calls": _safe_mean(
+                    [
+                        (item.get("llm_calls") or {}).get("total")
+                        for item in items
+                        if (item.get("llm_calls") or {}).get("total") is not None
+                    ]
+                ),
+                "avg_duration_seconds": _safe_mean(
+                    [
+                        item.get("duration_seconds")
+                        for item in items
+                        if item.get("duration_seconds") is not None
+                    ]
+                ),
+            }
+        )
     return rows
 
 
-def _group_by_config_task(results: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+def _group_by_config_task(
+    results: list[dict[str, Any]],
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for result in results:
-        grouped.setdefault((result.get("config"), result.get("task_id")), []).append(result)
+        grouped.setdefault((result.get("config"), result.get("task_id")), []).append(
+            result
+        )
     return grouped
 
 
@@ -321,7 +384,10 @@ def _cost_to_success(items: list[dict[str, Any]]) -> dict[str, Any]:
     for index, item in enumerate(items, start=1):
         total_calls += (item.get("llm_calls") or {}).get("total") or 0
         if (item.get("migration_metrics") or {}).get("migration_success"):
-            return {"first_success_rank": index, "llm_calls_to_first_success": total_calls}
+            return {
+                "first_success_rank": index,
+                "llm_calls_to_first_success": total_calls,
+            }
     return {"first_success_rank": None, "llm_calls_to_first_success": total_calls}
 
 

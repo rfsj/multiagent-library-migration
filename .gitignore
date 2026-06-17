@@ -14,3 +14,5 @@ experiments/summary_*.json
 uv.lock
 .env
 target/
+.ruff_cache
+.venv.uv-backup-20260526

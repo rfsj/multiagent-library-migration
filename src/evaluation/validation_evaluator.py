@@ -32,7 +32,8 @@ def evaluate_validation_result(
     must_detect = set(oracle.get("must_detect") or [])
 
     decision_correct = (
-        None if expected_verdict not in {"approved", "rejected"}
+        None
+        if expected_verdict not in {"approved", "rejected"}
         else observed_verdict == expected_verdict
     )
     reason_match = (
@@ -43,7 +44,9 @@ def evaluate_validation_result(
     must_detect_match = (
         None
         if not must_detect
-        else must_detect.issubset(set(observed_reasons) | set(_observed_evidence(final_validation)))
+        else must_detect.issubset(
+            set(observed_reasons) | set(_observed_evidence(final_validation))
+        )
     )
 
     false_accept = expected_verdict == "rejected" and observed_verdict == "approved"

@@ -53,22 +53,24 @@ def main() -> int:
                 "error": "run_task.py did not print a JSON report.",
             }
         reports.append(report)
-        attempts.append({
-            "attempt": attempt,
-            "returncode": proc.returncode,
-            "success": success_from_report(report),
-            "status": report.get("status"),
-            "run_dir": report.get("run_dir"),
-            "logs_dir": report.get("logs_dir"),
-            "tests_before": report.get("tests_before"),
-            "tests_after": report.get("tests_after"),
-            "final_validation_status": _final_validation_status(report),
-            "out_of_scope_changes": report.get("out_of_scope_changes"),
-            "unmigrated_uses": report.get("unmigrated_uses"),
-            "total_retries": report.get("total_retries"),
-            "replan_count": report.get("replan_count"),
-            "llm_calls": report.get("llm_calls", {}),
-        })
+        attempts.append(
+            {
+                "attempt": attempt,
+                "returncode": proc.returncode,
+                "success": success_from_report(report),
+                "status": report.get("status"),
+                "run_dir": report.get("run_dir"),
+                "logs_dir": report.get("logs_dir"),
+                "tests_before": report.get("tests_before"),
+                "tests_after": report.get("tests_after"),
+                "final_validation_status": _final_validation_status(report),
+                "out_of_scope_changes": report.get("out_of_scope_changes"),
+                "unmigrated_uses": report.get("unmigrated_uses"),
+                "total_retries": report.get("total_retries"),
+                "replan_count": report.get("replan_count"),
+                "llm_calls": report.get("llm_calls", {}),
+            }
+        )
 
     successes = [attempt["success"] for attempt in attempts]
     output = {

@@ -78,7 +78,9 @@ def main() -> int:
         return 0
 
     started = time.perf_counter()
-    matrix_dir = ROOT / "experiments" / "evaluations" / f"validation_matrix_{utc_timestamp()}"
+    matrix_dir = (
+        ROOT / "experiments" / "evaluations" / f"validation_matrix_{utc_timestamp()}"
+    )
     matrix_dir.mkdir(parents=True, exist_ok=True)
 
     results = []
@@ -176,26 +178,34 @@ def _build_run_level_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]
     rows = []
     for result in results:
         metrics = result.get("validation_metrics") or {}
-        rows.append({
-            "task_id": result.get("task_id"),
-            "run_dir": result.get("run_dir"),
-            "oracle_available": metrics.get("oracle_available"),
-            "expected_verdict": metrics.get("expected_verdict"),
-            "observed_verdict": metrics.get("observed_verdict"),
-            "validation_decision_correct": metrics.get("validation_decision_correct"),
-            "false_accept": metrics.get("false_accept"),
-            "false_reject": metrics.get("false_reject"),
-            "rejection_reason_match": metrics.get("rejection_reason_match"),
-            "expected_rejection_reasons": ";".join(metrics.get("expected_rejection_reasons") or []),
-            "observed_rejection_reasons": ";".join(metrics.get("observed_rejection_reasons") or []),
-            "tests_passed": metrics.get("tests_passed"),
-            "final_validation_status": metrics.get("final_validation_status"),
-            "out_of_scope_changes": metrics.get("out_of_scope_changes"),
-            "old_imports_remaining": metrics.get("old_imports_remaining"),
-            "unmigrated_uses": metrics.get("unmigrated_uses"),
-            "llm_calls": (result.get("llm_calls") or {}).get("total"),
-            "duration_seconds": result.get("duration_seconds"),
-        })
+        rows.append(
+            {
+                "task_id": result.get("task_id"),
+                "run_dir": result.get("run_dir"),
+                "oracle_available": metrics.get("oracle_available"),
+                "expected_verdict": metrics.get("expected_verdict"),
+                "observed_verdict": metrics.get("observed_verdict"),
+                "validation_decision_correct": metrics.get(
+                    "validation_decision_correct"
+                ),
+                "false_accept": metrics.get("false_accept"),
+                "false_reject": metrics.get("false_reject"),
+                "rejection_reason_match": metrics.get("rejection_reason_match"),
+                "expected_rejection_reasons": ";".join(
+                    metrics.get("expected_rejection_reasons") or []
+                ),
+                "observed_rejection_reasons": ";".join(
+                    metrics.get("observed_rejection_reasons") or []
+                ),
+                "tests_passed": metrics.get("tests_passed"),
+                "final_validation_status": metrics.get("final_validation_status"),
+                "out_of_scope_changes": metrics.get("out_of_scope_changes"),
+                "old_imports_remaining": metrics.get("old_imports_remaining"),
+                "unmigrated_uses": metrics.get("unmigrated_uses"),
+                "llm_calls": (result.get("llm_calls") or {}).get("total"),
+                "duration_seconds": result.get("duration_seconds"),
+            }
+        )
     return rows
 
 
@@ -209,29 +219,41 @@ def _build_summary_row(results: list[dict[str, Any]]) -> dict[str, Any]:
         "false_accept_rate": _mean_bool(labeled, "false_accept"),
         "false_reject_rate": _mean_bool(labeled, "false_reject"),
         "rejection_reason_match_rate": _mean_bool(
-            [item for item in labeled if item.get("rejection_reason_match") is not None],
+            [
+                item
+                for item in labeled
+                if item.get("rejection_reason_match") is not None
+            ],
             "rejection_reason_match",
         ),
-        "approval_rate": _safe_mean([
-            1.0 if item.get("observed_verdict") == "approved" else 0.0
-            for item in metrics
-            if item.get("observed_verdict")
-        ]),
-        "rejection_rate": _safe_mean([
-            1.0 if item.get("observed_verdict") == "rejected" else 0.0
-            for item in metrics
-            if item.get("observed_verdict")
-        ]),
-        "avg_llm_calls": _safe_mean([
-            (result.get("llm_calls") or {}).get("total")
-            for result in results
-            if (result.get("llm_calls") or {}).get("total") is not None
-        ]),
-        "avg_duration_seconds": _safe_mean([
-            result.get("duration_seconds")
-            for result in results
-            if result.get("duration_seconds") is not None
-        ]),
+        "approval_rate": _safe_mean(
+            [
+                1.0 if item.get("observed_verdict") == "approved" else 0.0
+                for item in metrics
+                if item.get("observed_verdict")
+            ]
+        ),
+        "rejection_rate": _safe_mean(
+            [
+                1.0 if item.get("observed_verdict") == "rejected" else 0.0
+                for item in metrics
+                if item.get("observed_verdict")
+            ]
+        ),
+        "avg_llm_calls": _safe_mean(
+            [
+                (result.get("llm_calls") or {}).get("total")
+                for result in results
+                if (result.get("llm_calls") or {}).get("total") is not None
+            ]
+        ),
+        "avg_duration_seconds": _safe_mean(
+            [
+                result.get("duration_seconds")
+                for result in results
+                if result.get("duration_seconds") is not None
+            ]
+        ),
     }
 
 

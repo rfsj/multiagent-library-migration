@@ -56,10 +56,13 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "input", help="Matrix directory, planner-matrix directory, or a single eval *.json report."
+        "input",
+        help="Matrix directory, planner-matrix directory, or a single eval *.json report.",
     )
     parser.add_argument(
-        "--output", default=None, help="Output HTML path. Default: report.html next to the input."
+        "--output",
+        default=None,
+        help="Output HTML path. Default: report.html next to the input.",
     )
     args = parser.parse_args()
 
@@ -71,7 +74,9 @@ def main() -> int:
     title, body = _render(kind, payload, input_path)
     document = _wrap_html(title, body)
 
-    output_path = Path(args.output).resolve() if args.output else _default_output(input_path)
+    output_path = (
+        Path(args.output).resolve() if args.output else _default_output(input_path)
+    )
     output_path.write_text(document, encoding="utf-8")
     print(f"Wrote {kind} report -> {output_path}")
     return 0
@@ -87,6 +92,7 @@ def _default_output(input_path: Path) -> Path:
 # Loading
 # --------------------------------------------------------------------------
 
+
 def _load(input_path: Path) -> tuple[str, dict[str, Any]]:
     if input_path.is_dir():
         matrix_report = input_path / "matrix_report.json"
@@ -98,9 +104,13 @@ def _load(input_path: Path) -> tuple[str, dict[str, Any]]:
         if planner_report.exists():
             return "planner_matrix", _load_planner_matrix(input_path, planner_report)
         if migration_report.exists():
-            return "migration_matrix", _load_migration_matrix(input_path, migration_report)
+            return "migration_matrix", _load_migration_matrix(
+                input_path, migration_report
+            )
         if validation_report.exists():
-            return "validation_matrix", _load_validation_matrix(input_path, validation_report)
+            return "validation_matrix", _load_validation_matrix(
+                input_path, validation_report
+            )
         raise SystemExit(
             f"{input_path} does not look like a supported matrix output directory."
         )
@@ -116,7 +126,9 @@ def _load(input_path: Path) -> tuple[str, dict[str, Any]]:
     if phase == "migration_matrix":
         return "migration_matrix", _load_migration_matrix(input_path.parent, input_path)
     if phase == "validation_matrix":
-        return "validation_matrix", _load_validation_matrix(input_path.parent, input_path)
+        return "validation_matrix", _load_validation_matrix(
+            input_path.parent, input_path
+        )
     if phase == "planner_only":
         return "planner_only", payload
     raise SystemExit(
@@ -172,6 +184,7 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
 # Rendering: dispatch
 # --------------------------------------------------------------------------
 
+
 def _render(kind: str, payload: dict[str, Any], input_path: Path) -> tuple[str, str]:
     if kind == "matrix":
         return _render_matrix(payload)
@@ -190,14 +203,16 @@ def _render(kind: str, payload: dict[str, Any], input_path: Path) -> tuple[str, 
 
 def _render_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     title = "Evaluation Matrix Report"
-    meta = _meta_table({
-        "Configs": ", ".join(payload.get("configs", [])),
-        "Tasks": ", ".join(payload.get("tasks", [])),
-        "Attempts per run": payload.get("attempts_per_run"),
-        "k values": payload.get("k"),
-        "Duration": _seconds(payload.get("duration_seconds")),
-        "Source": payload.get("matrix_dir"),
-    })
+    meta = _meta_table(
+        {
+            "Configs": ", ".join(payload.get("configs", [])),
+            "Tasks": ", ".join(payload.get("tasks", [])),
+            "Attempts per run": payload.get("attempts_per_run"),
+            "k values": payload.get("k"),
+            "Duration": _seconds(payload.get("duration_seconds")),
+            "Source": payload.get("matrix_dir"),
+        }
+    )
 
     ablation_rows = payload.get("_ablation_rows", [])
     ablation_cols = [
@@ -246,7 +261,9 @@ def _render_matrix(payload: dict[str, Any]) -> tuple[str, str]:
 
     body = meta
     body += _section("Ablation summary", _table(ablation_cols, ablation_rows))
-    body += _section("Pass@K / pass^k by task x config", _table(pass_at_k_cols, pass_at_k_rows))
+    body += _section(
+        "Pass@K / pass^k by task x config", _table(pass_at_k_cols, pass_at_k_rows)
+    )
     body += _section(
         "Run-level detail",
         _table(run_level_cols, run_level_rows, row_status_key="success"),
@@ -256,14 +273,16 @@ def _render_matrix(payload: dict[str, Any]) -> tuple[str, str]:
 
 def _render_planner_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     title = "Planner-Only Matrix Report"
-    meta = _meta_table({
-        "Configs": ", ".join(payload.get("configs", [])),
-        "Tasks": ", ".join(payload.get("tasks", [])),
-        "Attempts per run": payload.get("attempts_per_run"),
-        "k values": payload.get("k"),
-        "Duration": _seconds(payload.get("duration_seconds")),
-        "Source": payload.get("matrix_dir"),
-    })
+    meta = _meta_table(
+        {
+            "Configs": ", ".join(payload.get("configs", [])),
+            "Tasks": ", ".join(payload.get("tasks", [])),
+            "Attempts per run": payload.get("attempts_per_run"),
+            "k values": payload.get("k"),
+            "Duration": _seconds(payload.get("duration_seconds")),
+            "Source": payload.get("matrix_dir"),
+        }
+    )
 
     ablation_rows = payload.get("_ablation_rows", [])
     ablation_cols = [
@@ -347,7 +366,10 @@ def _render_planner_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     )
     body += note
     body += _section("Plan validity summary", _table(ablation_cols, ablation_rows))
-    body += _section("Planner pass@K / pass^k by task x config", _table(pass_at_k_cols, pass_at_k_rows))
+    body += _section(
+        "Planner pass@K / pass^k by task x config",
+        _table(pass_at_k_cols, pass_at_k_rows),
+    )
     body += _section(
         "Plan validation detail",
         _table(run_cols, run_rows, row_status_key="valid_plan"),
@@ -357,13 +379,15 @@ def _render_planner_matrix(payload: dict[str, Any]) -> tuple[str, str]:
 
 def _render_migration_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     title = "Migration-Only Matrix Report"
-    meta = _meta_table({
-        "Source planner matrix": payload.get("source_planner_matrix"),
-        "Only valid plans": payload.get("only_valid_plans"),
-        "k values": payload.get("k"),
-        "Duration": _seconds(payload.get("duration_seconds")),
-        "Source": payload.get("matrix_dir"),
-    })
+    meta = _meta_table(
+        {
+            "Source planner matrix": payload.get("source_planner_matrix"),
+            "Only valid plans": payload.get("only_valid_plans"),
+            "k values": payload.get("k"),
+            "Duration": _seconds(payload.get("duration_seconds")),
+            "Source": payload.get("matrix_dir"),
+        }
+    )
 
     ablation_cols = [
         ("config", "Config", "plain"),
@@ -417,22 +441,31 @@ def _render_migration_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     ]
 
     body = meta
-    body += _section("Migration summary", _table(ablation_cols, payload.get("_ablation_rows", [])))
-    body += _section("Migration pass@K / pass^k", _table(pass_cols, payload.get("_pass_at_k_rows", [])))
+    body += _section(
+        "Migration summary", _table(ablation_cols, payload.get("_ablation_rows", []))
+    )
+    body += _section(
+        "Migration pass@K / pass^k",
+        _table(pass_cols, payload.get("_pass_at_k_rows", [])),
+    )
     body += _section(
         "Migration detail",
-        _table(run_cols, payload.get("_run_rows", []), row_status_key="migration_success"),
+        _table(
+            run_cols, payload.get("_run_rows", []), row_status_key="migration_success"
+        ),
     )
     return title, body
 
 
 def _render_validation_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     title = "Validation-Only Matrix Report"
-    meta = _meta_table({
-        "Runs": len(payload.get("runs", []) or []),
-        "Duration": _seconds(payload.get("duration_seconds")),
-        "Source": payload.get("matrix_dir"),
-    })
+    meta = _meta_table(
+        {
+            "Runs": len(payload.get("runs", []) or []),
+            "Duration": _seconds(payload.get("duration_seconds")),
+            "Source": payload.get("matrix_dir"),
+        }
+    )
 
     summary_cols = [
         ("runs", "Runs", "plain"),
@@ -466,10 +499,16 @@ def _render_validation_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     ]
 
     body = meta
-    body += _section("Validation summary", _table(summary_cols, payload.get("_summary_rows", [])))
+    body += _section(
+        "Validation summary", _table(summary_cols, payload.get("_summary_rows", []))
+    )
     body += _section(
         "Validation detail",
-        _table(run_cols, payload.get("_run_rows", []), row_status_key="validation_decision_correct"),
+        _table(
+            run_cols,
+            payload.get("_run_rows", []),
+            row_status_key="validation_decision_correct",
+        ),
     )
     return title, body
 
@@ -480,14 +519,16 @@ def _render_full_eval(payload: dict[str, Any]) -> tuple[str, str]:
     pass_caret_k = payload.get("pass_caret_k", {})
     cost = payload.get("cost_to_success", {})
 
-    meta = _meta_table({
-        "Task": payload.get("task_id"),
-        "Attempts completed": payload.get("attempts_completed"),
-        "Success rate": _fmt_rate(payload.get("success_rate")),
-        "First success @ attempt": cost.get("first_success_rank"),
-        "LLM calls to first success": cost.get("llm_calls_to_first_success"),
-        "Duration": _seconds(payload.get("duration_seconds")),
-    })
+    meta = _meta_table(
+        {
+            "Task": payload.get("task_id"),
+            "Attempts completed": payload.get("attempts_completed"),
+            "Success rate": _fmt_rate(payload.get("success_rate")),
+            "First success @ attempt": cost.get("first_success_rank"),
+            "LLM calls to first success": cost.get("llm_calls_to_first_success"),
+            "Duration": _seconds(payload.get("duration_seconds")),
+        }
+    )
 
     k_cols = [("metric", "Metric", "plain"), ("value", "Value", "badge")]
     k_rows = []
@@ -525,18 +566,22 @@ def _render_full_eval(payload: dict[str, Any]) -> tuple[str, str]:
 
 def _render_planner_only(payload: dict[str, Any]) -> tuple[str, str]:
     title = f"Planner-Only Report — {payload.get('task_id', '')}"
-    meta = _meta_table({
-        "Task": payload.get("task_id"),
-        "Planner version": payload.get("planner_version"),
-        "Valid plan": payload.get("valid_plan"),
-        "Plan validity score": _fmt_rate(payload.get("plan_validity_score")),
-        "Migration step count": payload.get("migration_step_count"),
-        "Human review required": payload.get("human_review_required"),
-        "Affected source files": ", ".join(payload.get("affected_source_files", [])),
-        "LLM calls": (payload.get("llm_calls") or {}).get("total"),
-        "Duration": _seconds(payload.get("duration_seconds")),
-        "Run dir": payload.get("run_dir"),
-    })
+    meta = _meta_table(
+        {
+            "Task": payload.get("task_id"),
+            "Planner version": payload.get("planner_version"),
+            "Valid plan": payload.get("valid_plan"),
+            "Plan validity score": _fmt_rate(payload.get("plan_validity_score")),
+            "Migration step count": payload.get("migration_step_count"),
+            "Human review required": payload.get("human_review_required"),
+            "Affected source files": ", ".join(
+                payload.get("affected_source_files", [])
+            ),
+            "LLM calls": (payload.get("llm_calls") or {}).get("total"),
+            "Duration": _seconds(payload.get("duration_seconds")),
+            "Run dir": payload.get("run_dir"),
+        }
+    )
 
     warnings = payload.get("planner_warnings", [])
     reasons = payload.get("human_review_reasons", [])
@@ -554,6 +599,7 @@ def _render_planner_only(payload: dict[str, Any]) -> tuple[str, str]:
 # --------------------------------------------------------------------------
 # Rendering: small building blocks
 # --------------------------------------------------------------------------
+
 
 def _section(heading: str, inner_html: str) -> str:
     return f"<section><h2>{html.escape(heading)}</h2>{inner_html}</section>"
@@ -578,7 +624,9 @@ def _format_violation_list(violations: list[dict[str, Any]]) -> list[str]:
     for violation in violations:
         code = violation.get("code", "violation")
         severity = violation.get("severity", "")
-        location = violation.get("path") or violation.get("file") or violation.get("step_id")
+        location = (
+            violation.get("path") or violation.get("file") or violation.get("step_id")
+        )
         message = violation.get("message", "")
         prefix = f"{severity}:{code}" if severity else str(code)
         if location:
@@ -601,7 +649,9 @@ def _table(
         row_class = ""
         if row_status_key is not None:
             row_class = _row_class(row.get(row_status_key))
-        cells = "".join(_cell(row.get(key), kind, label) for key, label, kind in columns)
+        cells = "".join(
+            _cell(row.get(key), kind, label) for key, label, kind in columns
+        )
         body_rows.append(f"<tr class='{row_class}'>{cells}</tr>")
 
     return (
@@ -749,6 +799,7 @@ def _text(value: Any) -> str:
 # --------------------------------------------------------------------------
 # Page shell
 # --------------------------------------------------------------------------
+
 
 def _wrap_html(title: str, body: str) -> str:
     return f"""<!DOCTYPE html>

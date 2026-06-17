@@ -36,7 +36,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Recompute planner matrix validity metrics without rerunning planner attempts."
     )
-    parser.add_argument("matrix_dir", help="Existing planner_matrix_<timestamp> directory.")
+    parser.add_argument(
+        "matrix_dir", help="Existing planner_matrix_<timestamp> directory."
+    )
     parser.add_argument(
         "--k",
         default=None,
@@ -76,12 +78,17 @@ def main() -> int:
     report["pass_at_k_csv"] = str(matrix_dir / "planner_pass_at_k.csv")
     report["ablation_csv"] = str(matrix_dir / "planner_ablation.csv")
     write_json(report_path, report)
-    print(json.dumps({
-        "phase": "planner_matrix_recomputed",
-        "matrix_dir": str(matrix_dir),
-        "k": k_raw,
-        "attempts": len(results),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "phase": "planner_matrix_recomputed",
+                "matrix_dir": str(matrix_dir),
+                "k": k_raw,
+                "attempts": len(results),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

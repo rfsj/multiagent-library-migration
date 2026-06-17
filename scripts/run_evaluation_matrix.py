@@ -158,9 +158,11 @@ def main() -> int:
     config_names = _resolve_configs(args.configs)
 
     if args.dry_run:
-        print(f"{len(config_names)} config(s) x {len(task_ids)} task(s) "
-              f"x {args.attempts} attempt(s) = "
-              f"{len(config_names) * len(task_ids) * args.attempts} full-workflow run(s)")
+        print(
+            f"{len(config_names)} config(s) x {len(task_ids)} task(s) "
+            f"x {args.attempts} attempt(s) = "
+            f"{len(config_names) * len(task_ids) * args.attempts} full-workflow run(s)"
+        )
         for config_name in config_names:
             for task_id in task_ids:
                 print(f"  [{config_name}] {task_id}")
@@ -288,20 +290,22 @@ def _build_run_level_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, An
         task_id = full_eval.get("task_id")
         config_name = full_eval.get("config")
         for attempt in full_eval.get("attempts", []):
-            rows.append({
-                "task_id": task_id,
-                "config": config_name,
-                "attempt": attempt.get("attempt"),
-                "success": attempt.get("success"),
-                "tests_after": attempt.get("tests_after"),
-                "final_validation": attempt.get("final_validation_status"),
-                "out_of_scope_changes": attempt.get("out_of_scope_changes"),
-                "unmigrated_uses": attempt.get("unmigrated_uses"),
-                "retries": attempt.get("total_retries"),
-                "replans": attempt.get("replan_count"),
-                "llm_calls": attempt.get("llm_calls", {}).get("total"),
-                "run_dir": attempt.get("run_dir"),
-            })
+            rows.append(
+                {
+                    "task_id": task_id,
+                    "config": config_name,
+                    "attempt": attempt.get("attempt"),
+                    "success": attempt.get("success"),
+                    "tests_after": attempt.get("tests_after"),
+                    "final_validation": attempt.get("final_validation_status"),
+                    "out_of_scope_changes": attempt.get("out_of_scope_changes"),
+                    "unmigrated_uses": attempt.get("unmigrated_uses"),
+                    "retries": attempt.get("total_retries"),
+                    "replans": attempt.get("replan_count"),
+                    "llm_calls": attempt.get("llm_calls", {}).get("total"),
+                    "run_dir": attempt.get("run_dir"),
+                }
+            )
     return rows
 
 
@@ -311,20 +315,22 @@ def _build_pass_at_k_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, An
         pass_at_k = full_eval.get("pass_at_k", {})
         pass_caret_k = full_eval.get("pass_caret_k", {})
         cost = full_eval.get("cost_to_success", {})
-        rows.append({
-            "task_id": full_eval.get("task_id"),
-            "config": full_eval.get("config"),
-            "attempts": full_eval.get("attempts_completed"),
-            "success_rate": full_eval.get("success_rate"),
-            "pass@1": pass_at_k.get("pass@1"),
-            "pass@3": pass_at_k.get("pass@3"),
-            "pass@5": pass_at_k.get("pass@5"),
-            "pass^1": pass_caret_k.get("pass^1"),
-            "pass^3": pass_caret_k.get("pass^3"),
-            "pass^5": pass_caret_k.get("pass^5"),
-            "first_success_rank": cost.get("first_success_rank"),
-            "llm_calls_to_success": cost.get("llm_calls_to_first_success"),
-        })
+        rows.append(
+            {
+                "task_id": full_eval.get("task_id"),
+                "config": full_eval.get("config"),
+                "attempts": full_eval.get("attempts_completed"),
+                "success_rate": full_eval.get("success_rate"),
+                "pass@1": pass_at_k.get("pass@1"),
+                "pass@3": pass_at_k.get("pass@3"),
+                "pass@5": pass_at_k.get("pass@5"),
+                "pass^1": pass_caret_k.get("pass^1"),
+                "pass^3": pass_caret_k.get("pass^3"),
+                "pass^5": pass_caret_k.get("pass^5"),
+                "first_success_rank": cost.get("first_success_rank"),
+                "llm_calls_to_success": cost.get("llm_calls_to_first_success"),
+            }
+        )
     return rows
 
 
@@ -335,7 +341,9 @@ def _build_ablation_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, Any
 
     rows = []
     for config_name, evals in by_config.items():
-        all_attempts = [attempt for full_eval in evals for attempt in full_eval.get("attempts", [])]
+        all_attempts = [
+            attempt for full_eval in evals for attempt in full_eval.get("attempts", [])
+        ]
         successes = [bool(attempt.get("success")) for attempt in all_attempts]
         llm_calls = [
             attempt.get("llm_calls", {}).get("total")
@@ -363,17 +371,23 @@ def _build_ablation_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, Any
             for full_eval in evals
             if full_eval.get("pass_at_k", {}).get("pass@5") is not None
         ]
-        rows.append({
-            "config": config_name,
-            "tasks": len(evals),
-            "success_rate": _safe_mean([1.0 if s else 0.0 for s in successes]),
-            "pass@3": _safe_mean([1.0 if v else 0.0 for v in pass3_values]),
-            "pass@5": _safe_mean([1.0 if v else 0.0 for v in pass5_values]),
-            "avg_llm_calls": _safe_mean(llm_calls),
-            "avg_retries": _safe_mean(retries),
-            "scope_violation_rate": _safe_mean([1.0 if v else 0.0 for v in scope_violations]),
-            "unmigrated_usage_rate": _safe_mean([1.0 if v else 0.0 for v in unmigrated]),
-        })
+        rows.append(
+            {
+                "config": config_name,
+                "tasks": len(evals),
+                "success_rate": _safe_mean([1.0 if s else 0.0 for s in successes]),
+                "pass@3": _safe_mean([1.0 if v else 0.0 for v in pass3_values]),
+                "pass@5": _safe_mean([1.0 if v else 0.0 for v in pass5_values]),
+                "avg_llm_calls": _safe_mean(llm_calls),
+                "avg_retries": _safe_mean(retries),
+                "scope_violation_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in scope_violations]
+                ),
+                "unmigrated_usage_rate": _safe_mean(
+                    [1.0 if v else 0.0 for v in unmigrated]
+                ),
+            }
+        )
     return rows
 
 

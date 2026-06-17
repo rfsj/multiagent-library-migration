@@ -46,14 +46,24 @@ def validate_plan(
     _validate_contract(diagnosis, raw_steps, violations)
 
     allowed_files_by_step = [_step_allowed_files(step) for step in steps]
-    all_allowed_files = set().union(*allowed_files_by_step) if allowed_files_by_step else set()
+    all_allowed_files = (
+        set().union(*allowed_files_by_step) if allowed_files_by_step else set()
+    )
     allowed_source_files = {
-        path for path in all_allowed_files if path.endswith(".py") and path not in dependency_files
+        path
+        for path in all_allowed_files
+        if path.endswith(".py") and path not in dependency_files
     }
-    diagnosis_affected_source_files = set(diagnosis.get("affected_source_files", []) or [])
+    diagnosis_affected_source_files = set(
+        diagnosis.get("affected_source_files", []) or []
+    )
 
-    missing_affected_source_files = sorted(required_source_files - diagnosis_affected_source_files)
-    extra_affected_source_files = sorted(diagnosis_affected_source_files - required_source_files)
+    missing_affected_source_files = sorted(
+        required_source_files - diagnosis_affected_source_files
+    )
+    extra_affected_source_files = sorted(
+        diagnosis_affected_source_files - required_source_files
+    )
     missing_allowed_source_files = sorted(required_source_files - allowed_source_files)
     unexpected_allowed_files = sorted(
         path
@@ -101,26 +111,29 @@ def validate_plan(
         for index, allowed_files in enumerate(allowed_files_by_step)
         if allowed_files.intersection(required_source_files)
     ]
-    dependency_plan_valid = (
-        not dependency_update_required
-        or bool(dependency_step_indexes)
+    dependency_plan_valid = not dependency_update_required or bool(
+        dependency_step_indexes
     )
     if not dependency_plan_valid:
-        violations.append({
-            "code": "missing_dependency_update_step",
-            "severity": "error",
-            "message": "Target dependency must be added but no dependency file is allowed by any step.",
-        })
+        violations.append(
+            {
+                "code": "missing_dependency_update_step",
+                "severity": "error",
+                "message": "Target dependency must be added but no dependency file is allowed by any step.",
+            }
+        )
 
     step_order_valid = True
     if dependency_update_required and dependency_step_indexes and source_step_indexes:
         step_order_valid = min(dependency_step_indexes) <= min(source_step_indexes)
         if not step_order_valid:
-            violations.append({
-                "code": "dependency_step_after_source_step",
-                "severity": "error",
-                "message": "Dependency update should be planned before source migration steps.",
-            })
+            violations.append(
+                {
+                    "code": "dependency_step_after_source_step",
+                    "severity": "error",
+                    "message": "Dependency update should be planned before source migration steps.",
+                }
+            )
     declared_order_valid = _validate_required_ordering(
         steps,
         dependency_files,
@@ -148,13 +161,17 @@ def validate_plan(
     human_review_match = _validate_human_review(diagnosis, expected, violations)
     duplicate_scope_count = _validate_duplicate_scopes(steps, violations)
 
-    migration_needed = bool(project_audit.get("migration_needed", required_source_files))
+    migration_needed = bool(
+        project_audit.get("migration_needed", required_source_files)
+    )
     if migration_needed and not steps:
-        violations.append({
-            "code": "missing_migration_steps",
-            "severity": "error",
-            "message": "Migration is needed but the planner produced no migration steps.",
-        })
+        violations.append(
+            {
+                "code": "missing_migration_steps",
+                "severity": "error",
+                "message": "Migration is needed but the planner produced no migration steps.",
+            }
+        )
 
     file_coverage_rate = _coverage_rate(required_source_files, allowed_source_files)
     affected_file_coverage_rate = _coverage_rate(
@@ -190,7 +207,9 @@ def validate_plan(
         "affected_file_coverage_rate": round(affected_file_coverage_rate, 4),
         "scope_precision_rate": round(scope_precision_rate, 4),
         "symbol_coverage_rate": symbol_result["symbol_coverage_rate"],
-        "expected_step_coverage_rate": expected_step_result["expected_step_coverage_rate"],
+        "expected_step_coverage_rate": expected_step_result[
+            "expected_step_coverage_rate"
+        ],
         "dependency_update_required": dependency_update_required,
         "dependency_plan_valid": dependency_plan_valid,
         "step_order_valid": step_order_valid,
@@ -205,7 +224,9 @@ def validate_plan(
         "missing_allowed_source_files": missing_allowed_source_files,
         "unexpected_allowed_files": unexpected_allowed_files,
         "missing_required_symbols": symbol_result["missing_required_symbols"],
-        "missing_expected_step_groups": expected_step_result["missing_expected_step_groups"],
+        "missing_expected_step_groups": expected_step_result[
+            "missing_expected_step_groups"
+        ],
         "plan_violations": violations,
     }
 
@@ -223,71 +244,87 @@ def _validate_contract(
     ]
     for field in required_root_fields:
         if field not in diagnosis:
-            violations.append({
-                "code": "missing_plan_field",
-                "severity": "error",
-                "field": field,
-                "message": f"Diagnosis plan is missing required field {field}.",
-            })
+            violations.append(
+                {
+                    "code": "missing_plan_field",
+                    "severity": "error",
+                    "field": field,
+                    "message": f"Diagnosis plan is missing required field {field}.",
+                }
+            )
     if not isinstance(steps, list):
-        violations.append({
-            "code": "invalid_migration_steps_type",
-            "severity": "error",
-            "message": "migration_steps must be a list.",
-        })
+        violations.append(
+            {
+                "code": "invalid_migration_steps_type",
+                "severity": "error",
+                "message": "migration_steps must be a list.",
+            }
+        )
         return
 
     seen_step_ids: set[str] = set()
     for index, step in enumerate(steps, start=1):
         if not isinstance(step, dict):
-            violations.append({
-                "code": "invalid_step_type",
-                "severity": "error",
-                "step_index": index,
-                "message": "Each migration step must be an object.",
-            })
+            violations.append(
+                {
+                    "code": "invalid_step_type",
+                    "severity": "error",
+                    "step_index": index,
+                    "message": "Each migration step must be an object.",
+                }
+            )
             continue
         step_id = step.get("step_id")
         if not step_id:
-            violations.append({
-                "code": "missing_step_id",
-                "severity": "error",
-                "step_index": index,
-                "message": "Migration step is missing step_id.",
-            })
+            violations.append(
+                {
+                    "code": "missing_step_id",
+                    "severity": "error",
+                    "step_index": index,
+                    "message": "Migration step is missing step_id.",
+                }
+            )
         elif step_id in seen_step_ids:
-            violations.append({
-                "code": "duplicate_step_id",
-                "severity": "error",
-                "step_id": step_id,
-                "message": "Migration step_id must be unique.",
-            })
+            violations.append(
+                {
+                    "code": "duplicate_step_id",
+                    "severity": "error",
+                    "step_id": step_id,
+                    "message": "Migration step_id must be unique.",
+                }
+            )
         seen_step_ids.add(step_id)
 
         if not step.get("allowed_files"):
-            violations.append({
-                "code": "missing_step_allowed_files",
-                "severity": "error",
-                "step_id": step_id,
-                "message": "Migration step must declare allowed_files.",
-            })
+            violations.append(
+                {
+                    "code": "missing_step_allowed_files",
+                    "severity": "error",
+                    "step_id": step_id,
+                    "message": "Migration step must declare allowed_files.",
+                }
+            )
         for path in _step_declared_paths(step):
             if not _is_safe_relative_path(path):
-                violations.append({
-                    "code": "unsafe_plan_path",
-                    "severity": "error",
-                    "step_id": step_id,
-                    "path": path,
-                    "message": "Plan path must be a safe relative path.",
-                })
+                violations.append(
+                    {
+                        "code": "unsafe_plan_path",
+                        "severity": "error",
+                        "step_id": step_id,
+                        "path": path,
+                        "message": "Plan path must be a safe relative path.",
+                    }
+                )
             if _is_test_path(path):
-                violations.append({
-                    "code": "test_file_in_migration_scope",
-                    "severity": "error",
-                    "step_id": step_id,
-                    "path": path,
-                    "message": "Tests must not be migration targets.",
-                })
+                violations.append(
+                    {
+                        "code": "test_file_in_migration_scope",
+                        "severity": "error",
+                        "step_id": step_id,
+                        "path": path,
+                        "message": "Tests must not be migration targets.",
+                    }
+                )
 
 
 def _validate_required_symbols(
@@ -303,12 +340,9 @@ def _validate_required_symbols(
     total = 0
     covered = 0
     for file, symbols in required_symbols.items():
-        file_steps = [
-            step for step in steps if file in _step_allowed_files(step)
-        ]
-        whole_file_planned = (
-            coverage_policy == "whole_file_or_all_symbols"
-            and any(not step.get("allowed_symbols") for step in file_steps)
+        file_steps = [step for step in steps if file in _step_allowed_files(step)]
+        whole_file_planned = coverage_policy == "whole_file_or_all_symbols" and any(
+            not step.get("allowed_symbols") for step in file_steps
         )
         planned_symbols = {
             symbol
@@ -323,13 +357,15 @@ def _validate_required_symbols(
                 missing.setdefault(file, []).append(symbol)
 
     for file, symbols in missing.items():
-        violations.append({
-            "code": "missing_required_symbol",
-            "severity": "error",
-            "file": file,
-            "symbols": symbols,
-            "message": "Required symbol is not covered by any matching migration step.",
-        })
+        violations.append(
+            {
+                "code": "missing_required_symbol",
+                "severity": "error",
+                "file": file,
+                "symbols": symbols,
+                "message": "Required symbol is not covered by any matching migration step.",
+            }
+        )
 
     return {
         "symbol_coverage_rate": round(covered / total, 4) if total else 1.0,
@@ -352,12 +388,14 @@ def _validate_expected_step_groups(
     for group in expected_step_groups:
         if not any(_step_matches_group(step, group) for step in steps):
             missing.append(group)
-            violations.append({
-                "code": "missing_expected_step_group",
-                "severity": "error",
-                "expected_step_group": group,
-                "message": "No migration step satisfies this expected step group.",
-            })
+            violations.append(
+                {
+                    "code": "missing_expected_step_group",
+                    "severity": "error",
+                    "expected_step_group": group,
+                    "message": "No migration step satisfies this expected step group.",
+                }
+            )
 
     covered = len(expected_step_groups) - len(missing)
     return {
@@ -380,13 +418,15 @@ def _validate_allowed_granularity(
         step_granularity = "symbol" if step.get("allowed_symbols") else "file"
         if step_granularity not in allowed_granularity:
             valid = False
-            violations.append({
-                "code": "disallowed_step_granularity",
-                "severity": "error",
-                "step_id": step.get("step_id"),
-                "granularity": step_granularity,
-                "message": "Migration step granularity is not allowed by the validity oracle.",
-            })
+            violations.append(
+                {
+                    "code": "disallowed_step_granularity",
+                    "severity": "error",
+                    "step_id": step.get("step_id"),
+                    "granularity": step_granularity,
+                    "message": "Migration step granularity is not allowed by the validity oracle.",
+                }
+            )
     return {"granularity_valid": valid}
 
 
@@ -398,13 +438,15 @@ def _validate_forbidden_files(
     for path in sorted(allowed_files):
         for pattern in forbidden_patterns:
             if fnmatch(path, pattern):
-                violations.append({
-                    "code": "forbidden_file_allowed",
-                    "severity": "error",
-                    "path": path,
-                    "pattern": pattern,
-                    "message": "Migration step allows a file forbidden by the validity oracle.",
-                })
+                violations.append(
+                    {
+                        "code": "forbidden_file_allowed",
+                        "severity": "error",
+                        "path": path,
+                        "pattern": pattern,
+                        "message": "Migration step allows a file forbidden by the validity oracle.",
+                    }
+                )
 
 
 def _validate_required_ordering(
@@ -430,21 +472,25 @@ def _validate_required_ordering(
         )
         if before is None or after is None:
             valid = False
-            violations.append({
-                "code": "required_ordering_target_missing",
-                "severity": "error",
-                "ordering": rule,
-                "message": "Required ordering references a step class not present in the plan.",
-            })
+            violations.append(
+                {
+                    "code": "required_ordering_target_missing",
+                    "severity": "error",
+                    "ordering": rule,
+                    "message": "Required ordering references a step class not present in the plan.",
+                }
+            )
             continue
         if before > after:
             valid = False
-            violations.append({
-                "code": "required_ordering_violated",
-                "severity": "error",
-                "ordering": rule,
-                "message": "Plan violates a required ordering constraint.",
-            })
+            violations.append(
+                {
+                    "code": "required_ordering_violated",
+                    "severity": "error",
+                    "ordering": rule,
+                    "message": "Plan violates a required ordering constraint.",
+                }
+            )
     return valid
 
 
@@ -456,9 +502,13 @@ def _first_matching_step_index(
 ) -> int | None:
     for index, step in enumerate(steps):
         allowed_files = _step_allowed_files(step)
-        if target == "dependency_update" and allowed_files.intersection(dependency_files):
+        if target == "dependency_update" and allowed_files.intersection(
+            dependency_files
+        ):
             return index
-        if target == "source_migration" and allowed_files.intersection(required_source_files):
+        if target == "source_migration" and allowed_files.intersection(
+            required_source_files
+        ):
             return index
         if target.startswith("file:") and target.removeprefix("file:") in allowed_files:
             return index
@@ -479,13 +529,15 @@ def _validate_human_review(
     expected_value = bool(expected["human_review_required"])
     actual_value = bool(diagnosis.get("human_review_required"))
     if expected_value != actual_value:
-        violations.append({
-            "code": "human_review_mismatch",
-            "severity": "error",
-            "expected": expected_value,
-            "actual": actual_value,
-            "message": "Planner human_review_required does not match expected planner contract.",
-        })
+        violations.append(
+            {
+                "code": "human_review_mismatch",
+                "severity": "error",
+                "expected": expected_value,
+                "actual": actual_value,
+                "message": "Planner human_review_required does not match expected planner contract.",
+            }
+        )
         return False
     return True
 
@@ -502,12 +554,14 @@ def _validate_duplicate_scopes(
         )
         if scope in seen:
             duplicate_count += 1
-            violations.append({
-                "code": "duplicate_step_scope",
-                "severity": "error",
-                "step_id": step.get("step_id"),
-                "message": "Two migration steps declare the same file/symbol scope.",
-            })
+            violations.append(
+                {
+                    "code": "duplicate_step_scope",
+                    "severity": "error",
+                    "step_id": step.get("step_id"),
+                    "message": "Two migration steps declare the same file/symbol scope.",
+                }
+            )
         seen.add(scope)
     return duplicate_count
 
@@ -562,12 +616,14 @@ def _add_each(
     message: str,
 ) -> None:
     for value in values:
-        violations.append({
-            "code": code,
-            "severity": severity,
-            "path": value,
-            "message": message,
-        })
+        violations.append(
+            {
+                "code": code,
+                "severity": severity,
+                "path": value,
+                "message": message,
+            }
+        )
 
 
 def _coverage_rate(required: set[str], observed: set[str]) -> float:
