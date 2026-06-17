@@ -6,5 +6,56 @@
   "expected_changed_files": [
     "src/reviews/stats.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/reviews/stats.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/reviews/stats.py": [
+        "category_distribution",
+        "top_rated_products",
+        "lowest_rated_products",
+        "brand_unique_categories"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/reviews/stats.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

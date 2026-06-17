@@ -7,5 +7,67 @@
     "src/retention/loaders.py",
     "src/retention/features.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/retention/features.py",
+      "src/retention/loaders.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/retention/features.py": [
+        "user_activity_summary",
+        "first_touch_revenue",
+        "weekly_cohort_retention"
+      ],
+      "src/retention/loaders.py": [
+        "load_events",
+        "load_users",
+        "valid_events"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/retention/features.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/retention/loaders.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

@@ -2,9 +2,59 @@
   "task_id": "task_022_apply_axis1",
   "source_library": "pandas",
   "target_library": "polars",
-  "description": "Migrate DataFrame.apply(func, axis=1) for row-wise operations: lambda summing multiple columns, named function with multi-column conditional logic, and lambda with guard clause — from pandas to Polars (with_columns + when/then/otherwise or map_rows).",
+  "description": "Migrate DataFrame.apply(func, axis=1) for row-wise operations: lambda summing multiple columns, named function with multi-column conditional logic, and lambda with guard clause \u2014 from pandas to Polars (with_columns + when/then/otherwise or map_rows).",
   "expected_changed_files": [
     "src/hr/calculations.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/hr/calculations.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/hr/calculations.py": [
+        "compute_total_compensation",
+        "classify_risk",
+        "effective_hourly_rate"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/hr/calculations.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

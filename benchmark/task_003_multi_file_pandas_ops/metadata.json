@@ -8,5 +8,78 @@
     "src/analytics/summaries.py",
     "src/analytics/quality.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/analytics/loaders.py",
+      "src/analytics/summaries.py",
+      "src/analytics/quality.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/analytics/loaders.py": [
+        "load_orders",
+        "load_customers",
+        "paid_orders"
+      ],
+      "src/analytics/summaries.py": [
+        "revenue_by_region",
+        "customer_lifetime_value",
+        "monthly_product_matrix"
+      ],
+      "src/analytics/quality.py": [
+        "latest_order_per_customer",
+        "invalid_order_rows"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/analytics/loaders.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/analytics/summaries.py"
+        ],
+        "step_kind": "source_migration"
+      },
+      {
+        "allowed_files": [
+          "src/analytics/quality.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }

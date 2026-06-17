@@ -6,5 +6,59 @@
   "expected_changed_files": [
     "src/analytics/processing.py",
     "requirements.txt"
-  ]
+  ],
+  "validity_oracle": {
+    "required_source_files": [
+      "src/analytics/processing.py"
+    ],
+    "dependency_update_required": true,
+    "allowed_dependency_files": [
+      "requirements.txt"
+    ],
+    "required_symbol_coverage": {
+      "src/analytics/processing.py": [
+        "load_sales",
+        "paid_high_value_orders",
+        "revenue_by_region",
+        "customer_lifetime_value",
+        "monthly_product_matrix",
+        "latest_order_per_customer",
+        "invalid_sales_rows"
+      ]
+    },
+    "coverage_policy": "whole_file_or_all_symbols",
+    "allowed_granularity": [
+      "file",
+      "symbol"
+    ],
+    "forbidden_files": [
+      "tests/*",
+      "test/*",
+      "*/tests/*",
+      "*/test/*",
+      "test_*.py",
+      "*_test.py",
+      "conftest.py"
+    ],
+    "required_ordering": [
+      {
+        "before": "dependency_update",
+        "after": "source_migration"
+      }
+    ],
+    "expected_step_groups": [
+      {
+        "allowed_files": [
+          "requirements.txt"
+        ],
+        "step_kind": "dependency_update"
+      },
+      {
+        "allowed_files": [
+          "src/analytics/processing.py"
+        ],
+        "step_kind": "source_migration"
+      }
+    ]
+  }
 }
