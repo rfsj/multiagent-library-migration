@@ -26,6 +26,7 @@ def _env_flag(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+
 _HUMAN_TEMPLATE = """\
 Analyze the project below and produce a migration plan from \
 {source_library} to {target_library}.
@@ -321,7 +322,11 @@ class DiagnosisAgent:
             target_library,
             use_ast=self._use_ast,
         )
-        audit_log_name = "project_audit.json" if replan_attempt == 0 else f"project_audit_replan_{replan_attempt}.json"
+        audit_log_name = (
+            "project_audit.json"
+            if replan_attempt == 0
+            else f"project_audit_replan_{replan_attempt}.json"
+        )
         (logs_dir / audit_log_name).write_text(
             json.dumps(audit, indent=2), encoding="utf-8"
         )
@@ -394,9 +399,15 @@ class DiagnosisAgent:
                 ),
                 "test_files": scan["test_files"],
                 "affected_source_files": source_scope_files,
-                "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
-                "dataframe_flow": json.dumps(dataframe_flow_payload, indent=2, sort_keys=True),
-                "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
+                "test_files_with_source_library_usage": scan[
+                    "test_files_with_source_library_usage"
+                ],
+                "dataframe_flow": json.dumps(
+                    dataframe_flow_payload, indent=2, sort_keys=True
+                ),
+                "replan_context": self._build_replan_context(
+                    replan_feedback, replan_attempt
+                ),
             },
         )
 
@@ -440,7 +451,9 @@ class DiagnosisAgent:
                 for af in (result.affected_files or [])
             ],
             "affected_source_files": affected_source_files,
-            "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
+            "test_files_with_source_library_usage": scan[
+                "test_files_with_source_library_usage"
+            ],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
             "dataframe_flow_analysis": dataframe_flow_payload,
@@ -808,7 +821,9 @@ def _planned_source_files_legacy(
         if file in candidates:
             selected.add(file)
         selected.update(
-            rel_file for rel_file in (payload.get("files", []) or []) if rel_file in candidates
+            rel_file
+            for rel_file in (payload.get("files", []) or [])
+            if rel_file in candidates
         )
         selected.update(
             rel_file

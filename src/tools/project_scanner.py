@@ -126,7 +126,9 @@ def build_project_audit(
         "source_api_calls_in_source": scan["source_api_calls_in_source"],
         "source_imports_in_tests": scan["source_imports_in_tests"],
         "source_api_calls_in_tests": scan["source_api_calls_in_tests"],
-        "migration_needed": bool(scan["source_imports_in_source"] or scan["source_api_calls_in_source"]),
+        "migration_needed": bool(
+            scan["source_imports_in_source"] or scan["source_api_calls_in_source"]
+        ),
         "diagnosis_use_ast": use_ast,
         "diagnosis_static_source_detection": use_ast,
         "test_usage_policy": (
@@ -148,38 +150,48 @@ def _scan_ast_tree(
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == source_library:
-                    source_imports.append({
+                    source_imports.append(
+                        {
+                            "file": rel,
+                            "line": node.lineno,
+                            "alias": alias.asname,
+                            "is_test": is_test,
+                        }
+                    )
+        if isinstance(node, ast.ImportFrom):
+            if node.module == source_library or (node.module or "").startswith(
+                f"{source_library}."
+            ):
+                source_imports.append(
+                    {
                         "file": rel,
                         "line": node.lineno,
-                        "alias": alias.asname,
+                        "alias": None,
                         "is_test": is_test,
-                    })
-        if isinstance(node, ast.ImportFrom):
-            if node.module == source_library or (node.module or "").startswith(f"{source_library}."):
-                source_imports.append({
-                    "file": rel,
-                    "line": node.lineno,
-                    "alias": None,
-                    "is_test": is_test,
-                })
+                    }
+                )
         if isinstance(node, ast.Call):
             api = _classify_call(node, aliases)
             if api:
-                source_api_calls.append({
-                    "file": rel,
-                    "line": node.lineno,
-                    "api": api,
-                    "is_test": is_test,
-                })
+                source_api_calls.append(
+                    {
+                        "file": rel,
+                        "line": node.lineno,
+                        "api": api,
+                        "is_test": is_test,
+                    }
+                )
         if isinstance(node, ast.Subscript):
             api = _classify_subscript(node)
             if api:
-                source_api_calls.append({
-                    "file": rel,
-                    "line": node.lineno,
-                    "api": api,
-                    "is_test": is_test,
-                })
+                source_api_calls.append(
+                    {
+                        "file": rel,
+                        "line": node.lineno,
+                        "api": api,
+                        "is_test": is_test,
+                    }
+                )
 
 
 def _library_aliases(tree: ast.AST, library: str) -> set[str]:

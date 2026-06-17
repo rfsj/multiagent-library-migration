@@ -242,23 +242,25 @@ class PlannerV3Agent:
             symbol_analysis_payload
         )
 
-        result: PlannerV3Plan = self._chain.invoke({
-            "source_library": source_library,
-            "target_library": target_library,
-            "file_contents": file_contents,
-            "dependency_files": scan["dependency_files"],
-            "test_files": scan["test_files"],
-            "affected_files": source_scope_files,
-            "symbol_analysis": json.dumps(
-                symbol_analysis_payload,
-                indent=2,
-                sort_keys=True,
-            ),
-            "replan_context": self._build_replan_context(
-                replan_feedback,
-                replan_attempt,
-            ),
-        })
+        result: PlannerV3Plan = self._chain.invoke(
+            {
+                "source_library": source_library,
+                "target_library": target_library,
+                "file_contents": file_contents,
+                "dependency_files": scan["dependency_files"],
+                "test_files": scan["test_files"],
+                "affected_files": source_scope_files,
+                "symbol_analysis": json.dumps(
+                    symbol_analysis_payload,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                "replan_context": self._build_replan_context(
+                    replan_feedback,
+                    replan_attempt,
+                ),
+            }
+        )
         if result is None:
             raise RuntimeError("PlannerV3Agent did not return a structured plan.")
 
@@ -592,16 +594,14 @@ def _planned_source_files(
         return candidate_files
 
     candidates = set(candidate_files)
-    selected = {
-        rel_file
-        for rel_file in plan.affected_files
-        if rel_file in candidates
-    }
+    selected = {rel_file for rel_file in plan.affected_files if rel_file in candidates}
     for step in plan.migration_steps:
         if step.file in candidates:
             selected.add(step.file)
         selected.update(rel_file for rel_file in step.files if rel_file in candidates)
-        selected.update(rel_file for rel_file in step.allowed_files if rel_file in candidates)
+        selected.update(
+            rel_file for rel_file in step.allowed_files if rel_file in candidates
+        )
     return [rel_file for rel_file in candidate_files if rel_file in selected]
 
 
