@@ -46,6 +46,14 @@ by planner and migration matrix runners.
 | `v3_symbol_analysis` | `DIAGNOSIS_AGENT_IMPL=v3`, `PLANNER_USE_SYMBOL_ANALYSIS=1`, `MIGRATION_USE_SCOPE=1` |
 | `legacy` | `DIAGNOSIS_AGENT_IMPL=legacy` |
 
+`DIAGNOSIS_USE_AST` controls whether the Diagnosis/Planner path uses Python
+AST parsing for project scanning, top-level symbol validation, and deterministic
+least-scope splitting. It defaults to enabled. Setting `DIAGNOSIS_USE_AST=0`
+disables source-library usage discovery in the diagnosis scanner and skips
+AST-based symbol validation/splitting; structural file enumeration for
+dependencies and tests still runs because it is part of the benchmark/audit
+contract. The choice is recorded in planner reports and environment snapshots.
+
 Important caveat: the current implementation does not expose independent
 switches for every conceptual feature. `PLANNER_USE_SYMBOL_ANALYSIS=1` enables
 the practical bundle of symbol analysis, least-scope planning support, and

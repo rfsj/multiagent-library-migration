@@ -90,6 +90,7 @@ def llm_call_summary() -> dict[str, Any]:
 def env_snapshot() -> dict[str, str | None]:
     keys = [
         "DIAGNOSIS_AGENT_IMPL",
+        "DIAGNOSIS_USE_AST",
         "LLM_PROVIDER",
         "LLM_MODEL",
         "MIGRATION_MODE",
