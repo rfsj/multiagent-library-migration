@@ -7,6 +7,13 @@ from src.agents.diagnosis_agent import (
     _migratable_symbols,
     _should_keep_file_level_step,
 )
+from src.agents.planner_v3_agent import (
+    PlannerGuardrailEvent,
+    PlannerV3Plan,
+    PlannerV3Step,
+    _planned_source_files,
+    _valid_allowed_symbols,
+)
 
 
 def test_task_001_contains_expected_pandas_usage():
@@ -52,6 +59,78 @@ def test_scanner_separates_source_and_test_pandas_usage(tmp_path):
     assert audit["test_import_count"] == 1
     assert audit["dependency_summary"]["source_dependency_present"] is True
     assert audit["dependency_summary"]["target_dependency_action"] == "add_dependency"
+
+
+def test_scanner_disables_source_usage_detection_without_ast(tmp_path):
+    project_dir = tmp_path / "project"
+    source_dir = project_dir / "src"
+    source_dir.mkdir(parents=True)
+    (source_dir / "broken.py").write_text(
+        "import pandas as pd\n\n"
+        "def load(path):\n"
+        "    return pd.read_csv(path)\n"
+        "def incomplete(:\n",
+        encoding="utf-8",
+    )
+
+    ast_scan = scan_project(project_dir, "pandas", use_ast=True)
+    text_scan = scan_project(project_dir, "pandas", use_ast=False)
+
+    assert ast_scan["affected_source_files"] == []
+    assert text_scan["affected_source_files"] == []
+    assert text_scan["source_api_calls"] == []
+    assert text_scan["dependency_files"] == []
+
+
+def test_planner_allowed_symbol_validation_can_skip_ast(tmp_path):
+    source = tmp_path / "processing.py"
+    source.write_text(
+        "def existing():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    warnings: list[str] = []
+    events: list[PlannerGuardrailEvent] = []
+
+    kept = _valid_allowed_symbols(
+        source,
+        ["not_actually_defined"],
+        warnings,
+        events,
+        "step_001",
+        "src/processing.py",
+        False,
+    )
+
+    assert kept == ["not_actually_defined"]
+    assert any(event.rule == "diagnosis_ast_disabled" for event in events)
+
+
+def test_planner_uses_llm_selected_files_when_ast_disabled():
+    plan = PlannerV3Plan(
+        source_library="pandas",
+        target_library="polars",
+        dependency_files=["requirements.txt"],
+        affected_files=["src/a.py"],
+        related_tests=[],
+        complexity={"src/a.py": "low"},
+        migration_steps=[
+            PlannerV3Step(
+                step_id="step_001",
+                file="src/b.py",
+                description="Migrate b.",
+                allowed_files=["src/b.py"],
+            )
+        ],
+    )
+
+    selected = _planned_source_files(
+        plan,
+        ["src/a.py", "src/b.py", "src/c.py"],
+        use_ast=False,
+    )
+
+    assert selected == ["src/a.py", "src/b.py"]
 
 
 def test_diagnosis_symbol_detection_finds_dataframe_functions(tmp_path):

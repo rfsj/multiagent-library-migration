@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ast
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,11 +19,18 @@ load_dotenv()
 
 _PROMPTS_DIR = Path(__file__).parents[2] / "prompts"
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 _HUMAN_TEMPLATE = """\
 Analyze the project below and produce a migration plan from \
 {source_library} to {target_library}.
 
-## Source files with {source_library} usage
+## Source files provided for analysis
 
 {file_contents}
 
@@ -31,7 +39,7 @@ Analyze the project below and produce a migration plan from \
 - Dependency files: {dependency_files}
 - Dependency summary: {dependency_summary}
 - Test files: {test_files}
-- Production files requiring migration: {affected_source_files}
+- Affected or candidate production files: {affected_source_files}
 - Test files that use {source_library} for fixtures/assertions: {test_files_with_source_library_usage}
 
 ## DataFrame flow analysis
@@ -279,6 +287,7 @@ class DiagnosisAgent:
         ])
         self._flow_chain = flow_prompt | flow_llm
         self._raw_flow_chain = flow_prompt | raw_llm | StrOutputParser()
+        self._use_ast = _env_flag("DIAGNOSIS_USE_AST", True)
 
     def run(
         self,
@@ -290,20 +299,30 @@ class DiagnosisAgent:
         replan_attempt: int = 0,
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
-        scan = scan_project(project_dir, source_library)
-        audit = build_project_audit(project_dir, source_library, target_library)
+        scan = scan_project(project_dir, source_library, use_ast=self._use_ast)
+        audit = build_project_audit(
+            project_dir,
+            source_library,
+            target_library,
+            use_ast=self._use_ast,
+        )
         audit_log_name = "project_audit.json" if replan_attempt == 0 else f"project_audit_replan_{replan_attempt}.json"
         (logs_dir / audit_log_name).write_text(
             json.dumps(audit, indent=2), encoding="utf-8"
         )
 
-        file_contents = self._collect_file_contents(project_dir, scan["affected_source_files"])
+        source_scope_files = (
+            scan["affected_source_files"]
+            if self._use_ast
+            else scan["production_source_files"]
+        )
+        file_contents = self._collect_file_contents(project_dir, source_scope_files)
         flow_payload = {
             "source_library": source_library,
             "target_library": target_library,
             "file_contents": file_contents,
             "dependency_files": scan["dependency_files"],
-            "affected_source_files": scan["affected_source_files"],
+            "affected_source_files": source_scope_files,
         }
         dataframe_flow: Optional[DataFrameFlowAnalysis] = self._flow_chain.invoke(flow_payload)
         if dataframe_flow is None:
@@ -333,15 +352,27 @@ class DiagnosisAgent:
                 "dependency_files": scan["dependency_files"],
                 "dependency_summary": json.dumps(audit["dependency_summary"], indent=2, sort_keys=True),
                 "test_files": scan["test_files"],
-                "affected_source_files": scan["affected_source_files"],
+                "affected_source_files": source_scope_files,
                 "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
                 "dataframe_flow": json.dumps(dataframe_flow_payload, indent=2, sort_keys=True),
                 "replan_context": self._build_replan_context(replan_feedback, replan_attempt),
             },
         )
+
+        # Derive flat affected_files list for downstream compat (v2 returns objects)
+        affected_files_flat = [
+            af.file if hasattr(af, "file") else str(af)
+            for af in (result.affected_files or [])
+        ]
+        affected_source_files = _planned_source_files_legacy(
+            result.migration_steps,
+            affected_files_flat,
+            source_scope_files,
+            use_ast=self._use_ast,
+        )
         migration_steps, planner_warnings = self._sanitize_migration_steps(
             result.migration_steps,
-            scan["affected_source_files"],
+            affected_source_files,
             scan["dependency_files"],
             audit["dependency_summary"],
             project_dir,
@@ -354,17 +385,12 @@ class DiagnosisAgent:
         if not dep_files and result.dependency_analysis:
             dep_files = result.dependency_analysis.dependency_files_found or []
 
-        # Derive flat affected_files list for downstream compat (v2 returns objects)
-        affected_files_flat = [
-            af.file if hasattr(af, "file") else str(af)
-            for af in (result.affected_files or [])
-        ]
-
         plan = {
             "agent": self.name,
             "source_library": result.source_library,
             "target_library": result.target_library,
             "read_only": True,
+            "diagnosis_use_ast": self._use_ast,
             "dependency_files": dep_files,
             "dependency_summary": audit["dependency_summary"],
             "affected_files": affected_files_flat,
@@ -372,7 +398,7 @@ class DiagnosisAgent:
                 af.model_dump() if hasattr(af, "model_dump") else af
                 for af in (result.affected_files or [])
             ],
-            "affected_source_files": scan["affected_source_files"],
+            "affected_source_files": affected_source_files,
             "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
             "related_tests": result.related_tests,
             "complexity": result.complexity,
@@ -487,6 +513,7 @@ class DiagnosisAgent:
         allowed_scope = allowed_targets
         sanitized = []
         warnings = []
+        use_ast = getattr(self, "_use_ast", True)
         for step in steps:
             payload = step.model_dump()
             if payload["file"] not in allowed_targets:
@@ -507,13 +534,20 @@ class DiagnosisAgent:
                     f"Sanitized step {payload['step_id']} allowed_files; removed {removed}."
                 )
             if payload["file"].endswith(".py"):
-                payload["allowed_symbols"] = _sanitize_allowed_symbols(
-                    project_dir / payload["file"],
-                    payload.get("allowed_symbols", []),
-                    warnings,
-                    payload["step_id"],
-                    payload["file"],
-                )
+                if use_ast:
+                    payload["allowed_symbols"] = _sanitize_allowed_symbols(
+                        project_dir / payload["file"],
+                        payload.get("allowed_symbols", []),
+                        warnings,
+                        payload["step_id"],
+                        payload["file"],
+                    )
+                elif payload.get("allowed_symbols"):
+                    warnings.append(
+                        "DIAGNOSIS_USE_AST=0: kept allowed_symbols without "
+                        "AST-based top-level symbol validation for "
+                        f"{payload['file']}."
+                    )
             sanitized.append(payload)
         sanitized = _deduplicate_migration_steps(sanitized, warnings)
         sanitized = _group_cross_file_flow_steps(
@@ -530,6 +564,7 @@ class DiagnosisAgent:
             dependency_files,
             warnings,
             dataframe_flow or {},
+            use_ast,
         )
         if (
             sanitized
@@ -553,6 +588,7 @@ class DiagnosisAgent:
         dependency_files: list[str],
         warnings: list[str],
         dataframe_flow: dict[str, Any],
+        use_ast: bool,
     ) -> list[dict[str, Any]]:
         split_steps: list[dict[str, Any]] = []
         next_index = 1
@@ -584,6 +620,17 @@ class DiagnosisAgent:
                 cloned["step_id"] = f"step_{next_index:03d}"
                 split_steps.append(cloned)
                 next_index += 1
+                continue
+
+            if not use_ast:
+                cloned = dict(step)
+                cloned["step_id"] = f"step_{next_index:03d}"
+                split_steps.append(cloned)
+                next_index += 1
+                warnings.append(
+                    "DIAGNOSIS_USE_AST=0: skipped AST-based symbol splitting "
+                    f"for {rel_file}."
+                )
                 continue
 
             symbols = _migratable_symbols(project_dir / rel_file, source_library)
@@ -670,6 +717,34 @@ def _migratable_symbols(path: Path, source_library: str) -> list[str]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _symbol_uses_dataframe_api(node, aliases):
             symbols.append(node.name)
     return symbols
+
+
+def _planned_source_files_legacy(
+    steps: list[MigrationStep],
+    affected_files: list[str],
+    candidate_files: list[str],
+    *,
+    use_ast: bool,
+) -> list[str]:
+    if use_ast:
+        return candidate_files
+
+    candidates = set(candidate_files)
+    selected = {rel_file for rel_file in affected_files if rel_file in candidates}
+    for step in steps:
+        payload = step.model_dump() if hasattr(step, "model_dump") else dict(step)
+        file = payload.get("file")
+        if file in candidates:
+            selected.add(file)
+        selected.update(
+            rel_file for rel_file in (payload.get("files", []) or []) if rel_file in candidates
+        )
+        selected.update(
+            rel_file
+            for rel_file in (payload.get("allowed_files", []) or [])
+            if rel_file in candidates
+        )
+    return [rel_file for rel_file in candidate_files if rel_file in selected]
 
 
 def _sanitize_allowed_symbols(

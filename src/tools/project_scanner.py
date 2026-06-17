@@ -9,7 +9,12 @@ DEPENDENCY_FILES = ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg
 TEST_DIR_NAMES = {"test", "tests"}
 
 
-def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
+def scan_project(
+    project_dir: Path,
+    source_library: str,
+    *,
+    use_ast: bool = True,
+) -> dict[str, Any]:
     dependency_files = [
         str(path.relative_to(project_dir))
         for name in DEPENDENCY_FILES
@@ -23,54 +28,32 @@ def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
     ]
     source_imports: list[dict[str, Any]] = []
     source_api_calls: list[dict[str, Any]] = []
+    production_source_files: list[str] = []
 
     for path in project_dir.rglob("*.py"):
         if ".venv" in path.parts:
             continue
         rel = str(path.relative_to(project_dir))
         is_test = _is_test_file(path.relative_to(project_dir))
+        if not is_test:
+            production_source_files.append(rel)
         source = path.read_text(encoding="utf-8")
+        if not use_ast:
+            continue
         try:
             tree = ast.parse(source)
         except SyntaxError:
             continue
         aliases = _library_aliases(tree, source_library)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name == source_library:
-                        source_imports.append({
-                            "file": rel,
-                            "line": node.lineno,
-                            "alias": alias.asname,
-                            "is_test": is_test,
-                        })
-            if isinstance(node, ast.ImportFrom):
-                if node.module == source_library or (node.module or "").startswith(f"{source_library}."):
-                    source_imports.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "alias": None,
-                        "is_test": is_test,
-                    })
-            if isinstance(node, ast.Call):
-                api = _classify_call(node, aliases)
-                if api:
-                    source_api_calls.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "api": api,
-                        "is_test": is_test,
-                    })
-            if isinstance(node, ast.Subscript):
-                api = _classify_subscript(node)
-                if api:
-                    source_api_calls.append({
-                        "file": rel,
-                        "line": node.lineno,
-                        "api": api,
-                        "is_test": is_test,
-                    })
+        _scan_ast_tree(
+            tree,
+            aliases,
+            source_library,
+            rel,
+            is_test,
+            source_imports,
+            source_api_calls,
+        )
 
     affected_files = sorted({item["file"] for item in source_imports + source_api_calls})
     affected_source_files = sorted({
@@ -91,6 +74,7 @@ def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
         "dependency_files": sorted(set(dependency_files)),
         "dependency_specs": _dependency_specs(project_dir, dependency_files),
         "test_files": sorted(test_files),
+        "production_source_files": sorted(set(production_source_files)),
         "affected_files": affected_files,
         "affected_source_files": affected_source_files,
         "test_files_with_source_library_usage": test_files_with_source_library_usage,
@@ -103,8 +87,14 @@ def scan_project(project_dir: Path, source_library: str) -> dict[str, Any]:
     }
 
 
-def build_project_audit(project_dir: Path, source_library: str, target_library: str) -> dict[str, Any]:
-    scan = scan_project(project_dir, source_library)
+def build_project_audit(
+    project_dir: Path,
+    source_library: str,
+    target_library: str,
+    *,
+    use_ast: bool = True,
+) -> dict[str, Any]:
+    scan = scan_project(project_dir, source_library, use_ast=use_ast)
     dependency_summary = _dependency_summary(
         scan["dependency_specs"],
         source_library,
@@ -118,6 +108,7 @@ def build_project_audit(project_dir: Path, source_library: str, target_library: 
         "dependency_specs": scan["dependency_specs"],
         "dependency_summary": dependency_summary,
         "test_files": scan["test_files"],
+        "production_source_files": scan["production_source_files"],
         "affected_files": scan["affected_files"],
         "affected_source_files": scan["affected_source_files"],
         "test_files_with_source_library_usage": scan["test_files_with_source_library_usage"],
@@ -130,10 +121,59 @@ def build_project_audit(project_dir: Path, source_library: str, target_library: 
         "source_imports_in_tests": scan["source_imports_in_tests"],
         "source_api_calls_in_tests": scan["source_api_calls_in_tests"],
         "migration_needed": bool(scan["source_imports_in_source"] or scan["source_api_calls_in_source"]),
+        "diagnosis_use_ast": use_ast,
+        "diagnosis_static_source_detection": use_ast,
         "test_usage_policy": (
             "Source-library usage in tests is recorded for audit, but tests are not migration targets."
         ),
     }
+
+
+def _scan_ast_tree(
+    tree: ast.AST,
+    aliases: set[str],
+    source_library: str,
+    rel: str,
+    is_test: bool,
+    source_imports: list[dict[str, Any]],
+    source_api_calls: list[dict[str, Any]],
+) -> None:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == source_library:
+                    source_imports.append({
+                        "file": rel,
+                        "line": node.lineno,
+                        "alias": alias.asname,
+                        "is_test": is_test,
+                    })
+        if isinstance(node, ast.ImportFrom):
+            if node.module == source_library or (node.module or "").startswith(f"{source_library}."):
+                source_imports.append({
+                    "file": rel,
+                    "line": node.lineno,
+                    "alias": None,
+                    "is_test": is_test,
+                })
+        if isinstance(node, ast.Call):
+            api = _classify_call(node, aliases)
+            if api:
+                source_api_calls.append({
+                    "file": rel,
+                    "line": node.lineno,
+                    "api": api,
+                    "is_test": is_test,
+                })
+        if isinstance(node, ast.Subscript):
+            api = _classify_subscript(node)
+            if api:
+                source_api_calls.append({
+                    "file": rel,
+                    "line": node.lineno,
+                    "api": api,
+                    "is_test": is_test,
+                })
 
 
 def _library_aliases(tree: ast.AST, library: str) -> set[str]:

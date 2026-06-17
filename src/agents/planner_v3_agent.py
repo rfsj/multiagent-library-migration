@@ -30,7 +30,7 @@ _HUMAN_TEMPLATE = """\
 Analyze the project below and produce a migration plan from \
 {source_library} to {target_library}.
 
-## Source files with {source_library} usage
+## Source files provided for analysis
 
 {file_contents}
 
@@ -38,7 +38,7 @@ Analyze the project below and produce a migration plan from \
 
 - Dependency files: {dependency_files}
 - Test files: {test_files}
-- Affected files: {affected_files}
+- Affected or candidate production files: {affected_files}
 
 ## Structured symbol analysis
 
@@ -189,6 +189,7 @@ class PlannerV3Agent:
             ])
             | analysis_llm
         )
+        self._use_ast = _env_flag("DIAGNOSIS_USE_AST", True)
 
     def run(
         self,
@@ -200,9 +201,18 @@ class PlannerV3Agent:
         replan_attempt: int = 0,
     ) -> dict[str, Any]:
         logs_dir.mkdir(parents=True, exist_ok=True)
-        scan = scan_project(project_dir, source_library)
-        audit = build_project_audit(project_dir, source_library, target_library)
-        affected_source_files = scan["affected_source_files"]
+        scan = scan_project(project_dir, source_library, use_ast=self._use_ast)
+        audit = build_project_audit(
+            project_dir,
+            source_library,
+            target_library,
+            use_ast=self._use_ast,
+        )
+        source_scope_files = (
+            scan["affected_source_files"]
+            if self._use_ast
+            else scan["production_source_files"]
+        )
 
         audit_log_name = (
             "project_audit.json"
@@ -214,7 +224,7 @@ class PlannerV3Agent:
             encoding="utf-8",
         )
 
-        file_contents = self._collect_file_contents(project_dir, affected_source_files)
+        file_contents = self._collect_file_contents(project_dir, source_scope_files)
         symbol_analysis = self._analyze_symbols(
             logs_dir=logs_dir,
             source_library=source_library,
@@ -231,7 +241,7 @@ class PlannerV3Agent:
             "file_contents": file_contents,
             "dependency_files": scan["dependency_files"],
             "test_files": scan["test_files"],
-            "affected_files": affected_source_files,
+            "affected_files": source_scope_files,
             "symbol_analysis": json.dumps(
                 symbol_analysis_payload,
                 indent=2,
@@ -245,6 +255,11 @@ class PlannerV3Agent:
         if result is None:
             raise RuntimeError("PlannerV3Agent did not return a structured plan.")
 
+        affected_source_files = _planned_source_files(
+            result,
+            source_scope_files,
+            use_ast=self._use_ast,
+        )
         migration_steps, warnings, guardrail_events = self._normalize_steps(
             result.migration_steps,
             affected_source_files,
@@ -253,6 +268,7 @@ class PlannerV3Agent:
             project_dir,
             symbol_analysis_payload,
             dataframe_flow_analysis,
+            self._use_ast,
         )
         self._write_guardrail_log(logs_dir, guardrail_events, replan_attempt)
 
@@ -262,6 +278,7 @@ class PlannerV3Agent:
             "source_library": result.source_library,
             "target_library": result.target_library,
             "read_only": True,
+            "diagnosis_use_ast": self._use_ast,
             "dependency_files": scan["dependency_files"],
             "dependency_summary": audit["dependency_summary"],
             "affected_files": affected_source_files,
@@ -372,6 +389,7 @@ class PlannerV3Agent:
         project_dir: Path,
         symbol_analysis: dict[str, Any],
         dataframe_flow_analysis: dict[str, Any],
+        use_ast: bool,
     ) -> tuple[list[dict[str, Any]], list[str], list[PlannerGuardrailEvent]]:
         affected_targets = set(affected_source_files)
         dependency_targets = set(dependency_files)
@@ -476,6 +494,7 @@ class PlannerV3Agent:
                 guardrail_events,
                 step_id,
                 payload["file"],
+                use_ast,
             )
             payload["files"] = grouped_files
             payload["risk_level"] = _valid_risk_level(payload.get("risk_level"))
@@ -495,6 +514,7 @@ class PlannerV3Agent:
                     payload,
                     symbol_analysis,
                     dataframe_flow_analysis,
+                    use_ast,
                     warnings,
                 )
             )
@@ -550,6 +570,29 @@ class PlannerV3Agent:
         )
 
 
+def _planned_source_files(
+    plan: PlannerV3Plan,
+    candidate_files: list[str],
+    *,
+    use_ast: bool,
+) -> list[str]:
+    if use_ast:
+        return candidate_files
+
+    candidates = set(candidate_files)
+    selected = {
+        rel_file
+        for rel_file in plan.affected_files
+        if rel_file in candidates
+    }
+    for step in plan.migration_steps:
+        if step.file in candidates:
+            selected.add(step.file)
+        selected.update(rel_file for rel_file in step.files if rel_file in candidates)
+        selected.update(rel_file for rel_file in step.allowed_files if rel_file in candidates)
+    return [rel_file for rel_file in candidate_files if rel_file in selected]
+
+
 def _valid_allowed_symbols(
     path: Path,
     symbols: list[str],
@@ -557,9 +600,25 @@ def _valid_allowed_symbols(
     guardrail_events: list[PlannerGuardrailEvent],
     step_id: str,
     rel_file: str,
+    use_ast: bool,
 ) -> list[str]:
     if not symbols or path.suffix != ".py":
         return []
+    if not use_ast:
+        _record_guardrail(
+            guardrail_events,
+            warnings,
+            rule="diagnosis_ast_disabled",
+            severity="info",
+            action="skip_allowed_symbols_ast_validation",
+            message=(
+                "DIAGNOSIS_USE_AST=0: kept allowed_symbols without AST-based "
+                f"top-level symbol validation for {rel_file}."
+            ),
+            step_id=step_id,
+            file=rel_file,
+        )
+        return symbols
     valid = _top_level_symbols(path)
     kept = [symbol for symbol in symbols if symbol in valid]
     removed = sorted(set(symbols) - set(kept))
@@ -969,12 +1028,19 @@ def _least_scope_steps(
     step: dict[str, Any],
     symbol_analysis: dict[str, Any],
     dataframe_flow_analysis: dict[str, Any],
+    use_ast: bool,
     warnings: list[str],
 ) -> list[dict[str, Any]]:
     if step.get("files") or step.get("allowed_symbols"):
         return [step]
     rel_file = step["file"]
     if not rel_file.endswith(".py"):
+        return [step]
+    if not use_ast:
+        warnings.append(
+            "DIAGNOSIS_USE_AST=0: skipped AST-based least-scope splitting for "
+            f"{rel_file}."
+        )
         return [step]
 
     if rel_file in _file_level_flow_files(dataframe_flow_analysis):
