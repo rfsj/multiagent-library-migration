@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from experiment_utils import (
+    allowed_files_from_diagnosis,
     configure_llm_logging,
     create_eval_run_dir,
     enrich_step,
@@ -18,6 +19,8 @@ from experiment_utils import (
 )
 from src import llm_proxy
 from src.agents.migration_agent import MigrationAgent
+from src.agents.validation_agent import ValidationAgent
+from src.evaluation.migration_validator import validate_migration_result
 from src.tools.diff_analyzer import unified_diff
 
 
@@ -51,6 +54,26 @@ def main() -> int:
         llm_proxy.set_label(f"migration_only:{enriched['step_id']}")
         migrations.append(agent.run_step(project_dir, enriched, logs_dir))
 
+    final_validation = ValidationAgent().final_validate(
+        project_dir,
+        before_dir,
+        logs_dir,
+        metadata["source_library"],
+        allowed_files=allowed_files_from_diagnosis(diagnosis),
+    )
+    tests_after = {
+        "status": final_validation.get("tests"),
+        "passed": final_validation.get("tests") == "passed",
+    }
+    migration_metrics = validate_migration_result(
+        project_dir=project_dir,
+        before_dir=before_dir,
+        diagnosis=diagnosis,
+        metadata=metadata,
+        tests=tests_after,
+        final_validation=final_validation,
+    )
+
     diff_text = unified_diff(before_dir, project_dir)
     (run_dir / "diff.patch").write_text(diff_text, encoding="utf-8")
 
@@ -63,7 +86,7 @@ def main() -> int:
     )
     output = {
         "phase": "migration_only",
-        "status": "success",
+        "status": "success" if migration_metrics["migration_success"] else "failed",
         "task_id": args.task_id,
         "source_library": metadata["source_library"],
         "target_library": metadata["target_library"],
@@ -75,6 +98,9 @@ def main() -> int:
         "migration_step_count": len(diagnosis.get("migration_steps", [])),
         "executed_step_count": len(migrations),
         "changed_files": changed_files,
+        "tests_after": tests_after,
+        "final_validation": final_validation,
+        "migration_metrics": migration_metrics,
         "migrations": migrations,
         "diff_patch": str(run_dir / "diff.patch"),
         "llm_calls": llm_call_summary(),
@@ -83,7 +109,7 @@ def main() -> int:
     }
     write_json(run_dir / "migration_only_report.json", output)
     print_json(output)
-    return 0
+    return 0 if migration_metrics["migration_success"] else 1
 
 
 if __name__ == "__main__":

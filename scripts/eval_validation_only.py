@@ -8,12 +8,14 @@ from experiment_utils import (
     allowed_files_from_diagnosis,
     configure_llm_logging,
     env_snapshot,
+    load_task_metadata,
     llm_call_summary,
     print_json,
     read_json,
     write_json,
 )
 from src.agents.validation_agent import ValidationAgent
+from src.evaluation.validation_evaluator import evaluate_validation_result
 from src.tools.test_runner import run_pytest
 
 
@@ -27,6 +29,7 @@ def main() -> int:
         help="Existing run dir containing project/, snapshots/before_migration/, and logs/diagnosis_plan.json.",
     )
     parser.add_argument("--source-library", default=None)
+    parser.add_argument("--task-id", default=None)
     args = parser.parse_args()
 
     started = time.perf_counter()
@@ -76,9 +79,36 @@ def main() -> int:
         "environment": env_snapshot(),
         "duration_seconds": round(time.perf_counter() - started, 3),
     }
+    task_id = args.task_id or _task_id_from_run_dir(run_dir)
+    if task_id:
+        output["task_id"] = task_id
+        metadata = load_task_metadata(task_id)
+        output["validation_metrics"] = evaluate_validation_result(
+            validation_report=output,
+            metadata=metadata,
+        )
+    else:
+        output["validation_metrics"] = evaluate_validation_result(
+            validation_report=output,
+            metadata={},
+        )
     write_json(run_dir / "validation_only_report.json", output)
     print_json(output)
     return 0 if output["status"] == "success" else 1
+
+
+def _task_id_from_run_dir(run_dir: Path) -> str | None:
+    report_path = run_dir / "report.json"
+    if report_path.exists():
+        payload = read_json(report_path)
+        task_id = payload.get("task_id")
+        if task_id:
+            return str(task_id)
+    name = run_dir.name
+    marker = "_202"
+    if marker in name:
+        return name.split(marker, 1)[0]
+    return None
 
 
 if __name__ == "__main__":

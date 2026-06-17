@@ -19,10 +19,13 @@ Supported inputs (auto-detected):
    human-review rate, warnings, and cost. Use this to validate the planner in
    isolation before blaming migration/validation.
 
-3. A single `eval_full.py` output file (`*_full_eval.json`) -> one-task
+3. A `run_migration_matrix.py` or `run_validation_matrix.py` output directory
+   -> isolated migration/validation-agent metrics.
+
+4. A single `eval_full.py` output file (`*_full_eval.json`) -> one-task
    pass@k report.
 
-4. A single `eval_planner_only.py` output file (`planner_only_report.json`)
+5. A single `eval_planner_only.py` output file (`planner_only_report.json`)
    -> one planner run, rendered as a small fact sheet.
 
 Usage:
@@ -88,14 +91,18 @@ def _load(input_path: Path) -> tuple[str, dict[str, Any]]:
     if input_path.is_dir():
         matrix_report = input_path / "matrix_report.json"
         planner_report = input_path / "planner_matrix_report.json"
+        migration_report = input_path / "migration_matrix_report.json"
+        validation_report = input_path / "validation_matrix_report.json"
         if matrix_report.exists():
             return "matrix", _load_matrix(input_path, matrix_report)
         if planner_report.exists():
             return "planner_matrix", _load_planner_matrix(input_path, planner_report)
+        if migration_report.exists():
+            return "migration_matrix", _load_migration_matrix(input_path, migration_report)
+        if validation_report.exists():
+            return "validation_matrix", _load_validation_matrix(input_path, validation_report)
         raise SystemExit(
-            f"{input_path} does not look like a run_evaluation_matrix.py or "
-            "run_planner_matrix.py output directory (missing "
-            "matrix_report.json / planner_matrix_report.json)."
+            f"{input_path} does not look like a supported matrix output directory."
         )
 
     payload = json.loads(input_path.read_text(encoding="utf-8"))
@@ -106,6 +113,10 @@ def _load(input_path: Path) -> tuple[str, dict[str, Any]]:
         return "matrix", _load_matrix(input_path.parent, input_path)
     if phase == "planner_matrix":
         return "planner_matrix", _load_planner_matrix(input_path.parent, input_path)
+    if phase == "migration_matrix":
+        return "migration_matrix", _load_migration_matrix(input_path.parent, input_path)
+    if phase == "validation_matrix":
+        return "validation_matrix", _load_validation_matrix(input_path.parent, input_path)
     if phase == "planner_only":
         return "planner_only", payload
     raise SystemExit(
@@ -135,6 +146,21 @@ def _load_planner_matrix(dir_path: Path, report_path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_migration_matrix(dir_path: Path, report_path: Path) -> dict[str, Any]:
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["_run_rows"] = _read_csv(dir_path / "migration_run_level.csv")
+    payload["_pass_at_k_rows"] = _read_csv(dir_path / "migration_pass_at_k.csv")
+    payload["_ablation_rows"] = _read_csv(dir_path / "migration_ablation.csv")
+    return payload
+
+
+def _load_validation_matrix(dir_path: Path, report_path: Path) -> dict[str, Any]:
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["_run_rows"] = _read_csv(dir_path / "validation_run_level.csv")
+    payload["_summary_rows"] = _read_csv(dir_path / "validation_summary.csv")
+    return payload
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
@@ -151,6 +177,10 @@ def _render(kind: str, payload: dict[str, Any], input_path: Path) -> tuple[str, 
         return _render_matrix(payload)
     if kind == "planner_matrix":
         return _render_planner_matrix(payload)
+    if kind == "migration_matrix":
+        return _render_migration_matrix(payload)
+    if kind == "validation_matrix":
+        return _render_validation_matrix(payload)
     if kind == "full_eval":
         return _render_full_eval(payload)
     if kind == "planner_only":
@@ -325,6 +355,125 @@ def _render_planner_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     return title, body
 
 
+def _render_migration_matrix(payload: dict[str, Any]) -> tuple[str, str]:
+    title = "Migration-Only Matrix Report"
+    meta = _meta_table({
+        "Source planner matrix": payload.get("source_planner_matrix"),
+        "Only valid plans": payload.get("only_valid_plans"),
+        "k values": payload.get("k"),
+        "Duration": _seconds(payload.get("duration_seconds")),
+        "Source": payload.get("matrix_dir"),
+    })
+
+    ablation_cols = [
+        ("config", "Config", "plain"),
+        ("tasks", "Tasks", "plain"),
+        ("attempts", "Attempts", "plain"),
+        ("migration_success_rate", "Migration success", "rate"),
+        ("migration_pass@3", "Migration pass@3", "rate"),
+        ("migration_pass@5", "Migration pass@5", "rate"),
+        ("behavior_preservation_rate", "Behavior preserved", "rate"),
+        ("scope_compliance_rate", "Scope compliance", "rate"),
+        ("source_usage_removed_rate", "Source removed", "rate"),
+        ("target_usage_added_rate", "Target added", "rate"),
+        ("avg_diff_line_count", "Avg diff lines", "plain"),
+        ("avg_llm_calls", "Avg LLM calls", "plain"),
+        ("avg_duration_seconds", "Avg duration (s)", "plain"),
+    ]
+    pass_cols = [
+        ("task_id", "Task", "plain"),
+        ("config", "Config", "plain"),
+        ("attempts", "Attempts", "plain"),
+        ("migration_success_rate", "Migration success", "rate"),
+        ("migration_pass@1", "pass@1", "badge"),
+        ("migration_pass@3", "pass@3", "badge"),
+        ("migration_pass@5", "pass@5", "badge"),
+        ("migration_pass^1", "pass^1", "badge"),
+        ("migration_pass^3", "pass^3", "badge"),
+        ("migration_pass^5", "pass^5", "badge"),
+        ("first_success_rank", "First success @", "plain"),
+        ("llm_calls_to_success", "LLM calls to success", "plain"),
+    ]
+    run_cols = [
+        ("task_id", "Task", "plain"),
+        ("config", "Config", "plain"),
+        ("attempt", "#", "plain"),
+        ("migration_success", "Success", "badge"),
+        ("status", "Status", "badge"),
+        ("behavior_preserved", "Tests", "badge"),
+        ("final_validation_approved", "Final validation", "badge"),
+        ("source_usage_removed", "Source removed", "badge"),
+        ("target_usage_added", "Target added", "badge"),
+        ("scope_compliance", "Scope", "badge"),
+        ("out_of_scope_changes", "Scope violations", "count"),
+        ("old_imports_remaining", "Old imports", "count"),
+        ("unmigrated_uses", "Unmigrated uses", "count"),
+        ("missing_required_changed_files", "Missing changed files", "plain"),
+        ("missing_target_usage_files", "Missing target usage", "plain"),
+        ("diff_line_count", "Diff lines", "plain"),
+        ("violations", "Violations", "plain"),
+        ("llm_calls", "LLM calls", "plain"),
+        ("duration_seconds", "Duration (s)", "plain"),
+    ]
+
+    body = meta
+    body += _section("Migration summary", _table(ablation_cols, payload.get("_ablation_rows", [])))
+    body += _section("Migration pass@K / pass^k", _table(pass_cols, payload.get("_pass_at_k_rows", [])))
+    body += _section(
+        "Migration detail",
+        _table(run_cols, payload.get("_run_rows", []), row_status_key="migration_success"),
+    )
+    return title, body
+
+
+def _render_validation_matrix(payload: dict[str, Any]) -> tuple[str, str]:
+    title = "Validation-Only Matrix Report"
+    meta = _meta_table({
+        "Runs": len(payload.get("runs", []) or []),
+        "Duration": _seconds(payload.get("duration_seconds")),
+        "Source": payload.get("matrix_dir"),
+    })
+
+    summary_cols = [
+        ("runs", "Runs", "plain"),
+        ("labeled_runs", "Labeled runs", "plain"),
+        ("validation_accuracy", "Accuracy", "rate"),
+        ("false_accept_rate", "False accept", "rate_inverted"),
+        ("false_reject_rate", "False reject", "rate_inverted"),
+        ("rejection_reason_match_rate", "Reason match", "rate"),
+        ("approval_rate", "Approval rate", "rate"),
+        ("rejection_rate", "Rejection rate", "rate"),
+        ("avg_llm_calls", "Avg LLM calls", "plain"),
+        ("avg_duration_seconds", "Avg duration (s)", "plain"),
+    ]
+    run_cols = [
+        ("task_id", "Task", "plain"),
+        ("oracle_available", "Oracle", "badge"),
+        ("expected_verdict", "Expected", "badge"),
+        ("observed_verdict", "Observed", "badge"),
+        ("validation_decision_correct", "Correct", "badge"),
+        ("false_accept", "False accept", "negative_badge"),
+        ("false_reject", "False reject", "negative_badge"),
+        ("rejection_reason_match", "Reason match", "badge"),
+        ("expected_rejection_reasons", "Expected reasons", "plain"),
+        ("observed_rejection_reasons", "Observed reasons", "plain"),
+        ("tests_passed", "Tests", "badge"),
+        ("final_validation_status", "Final validation", "badge"),
+        ("out_of_scope_changes", "Scope violations", "count"),
+        ("old_imports_remaining", "Old imports", "count"),
+        ("unmigrated_uses", "Unmigrated uses", "count"),
+        ("duration_seconds", "Duration (s)", "plain"),
+    ]
+
+    body = meta
+    body += _section("Validation summary", _table(summary_cols, payload.get("_summary_rows", [])))
+    body += _section(
+        "Validation detail",
+        _table(run_cols, payload.get("_run_rows", []), row_status_key="validation_decision_correct"),
+    )
+    return title, body
+
+
 def _render_full_eval(payload: dict[str, Any]) -> tuple[str, str]:
     title = f"Full Evaluation Report — {payload.get('task_id', '')}"
     pass_at_k = payload.get("pass_at_k", {})
@@ -481,6 +630,8 @@ def _cell(value: Any, kind: str, label: str = "") -> str:
     data_label = html.escape(label)
     if kind == "badge":
         return f"<td data-label='{data_label}'>{_badge(value)}</td>"
+    if kind == "negative_badge":
+        return f"<td data-label='{data_label}'>{_negative_badge(value)}</td>"
     if kind == "rate":
         return f"<td data-label='{data_label}'>{_rate_bar(value)}</td>"
     if kind == "rate_inverted":
@@ -510,6 +661,21 @@ def _badge(value: Any) -> str:
     if normalized in GREEN_VALUES:
         css = "badge badge-green"
     elif normalized in RED_VALUES:
+        css = "badge badge-red"
+    elif normalized in ("", "none", "-"):
+        css = "badge badge-gray"
+        text = "–"
+    else:
+        css = "badge badge-gray"
+    return f"<span class='{css}'>{html.escape(text)}</span>"
+
+
+def _negative_badge(value: Any) -> str:
+    text = _text(value)
+    normalized = text.strip().lower()
+    if normalized == "false":
+        css = "badge badge-green"
+    elif normalized == "true":
         css = "badge badge-red"
     elif normalized in ("", "none", "-"):
         css = "badge badge-gray"
