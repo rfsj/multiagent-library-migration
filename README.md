@@ -44,6 +44,15 @@ Também é possível usar `LLM_PROVIDER=anthropic` instalando o extra opcional:
 pip install -e ".[anthropic]"
 ```
 
+Ou usar OpenAI com o extra correspondente:
+
+```bash
+pip install -e ".[openai]"
+export LLM_PROVIDER=openai
+export LLM_MODEL=gpt-4o-mini
+export OPENAI_API_KEY=<sua-chave>
+```
+
 Ou executar a tarefa padrão via `make`:
 
 ```bash

@@ -10,7 +10,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, field_validator
 
-from src.llm import get_llm, is_llm_timeout_error
+from src.llm import get_llm, is_llm_timeout_error, with_structured_output
 
 load_dotenv()
 
@@ -107,7 +107,7 @@ class ImplementationReviewAgent:
         system_prompt = (_PROMPTS_DIR / "implementation_review_agent_v2.md").read_text(
             encoding="utf-8"
         )
-        llm = get_llm().with_structured_output(ImplementationReviewResult)
+        llm = with_structured_output(get_llm(), ImplementationReviewResult)
         self._chain = (
             ChatPromptTemplate.from_messages(
                 [

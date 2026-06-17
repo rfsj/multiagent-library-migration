@@ -12,7 +12,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import get_llm, is_llm_timeout_error
+from src.llm import get_llm, is_llm_timeout_error, with_structured_output
 from src.tools.diff_analyzer import analyze_diff, changed_files
 from src.tools.project_scanner import scan_project
 from src.tools.test_runner import run_pytest
@@ -211,7 +211,7 @@ class ValidationAgent:
             system_prompt = (_PROMPTS_DIR / "validation_agent_v2.md").read_text(
                 encoding="utf-8"
             )
-            llm = get_llm().with_structured_output(ValidationVerdict)
+            llm = with_structured_output(get_llm(), ValidationVerdict)
             self._chain = (
                 ChatPromptTemplate.from_messages(
                     [

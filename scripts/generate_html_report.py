@@ -490,6 +490,8 @@ def _render_validation_matrix(payload: dict[str, Any]) -> tuple[str, str]:
         ("rejection_reason_match", "Reason match", "badge"),
         ("expected_rejection_reasons", "Expected reasons", "plain"),
         ("observed_rejection_reasons", "Observed reasons", "plain"),
+        ("must_detect", "Must detect", "plain"),
+        ("must_detect_match", "Must detect match", "badge"),
         ("tests_passed", "Tests", "badge"),
         ("final_validation_status", "Final validation", "badge"),
         ("out_of_scope_changes", "Scope violations", "count"),

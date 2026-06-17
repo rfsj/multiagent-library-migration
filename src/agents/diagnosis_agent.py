@@ -12,7 +12,12 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.llm import format_llm_timeout_error, get_llm, is_llm_timeout_error
+from src.llm import (
+    format_llm_timeout_error,
+    get_llm,
+    is_llm_timeout_error,
+    with_structured_output,
+)
 from src.tools.project_scanner import build_project_audit, scan_project
 
 load_dotenv()
@@ -282,7 +287,7 @@ class DiagnosisAgent:
         )
 
         raw_llm = get_llm()
-        flow_llm = raw_llm.with_structured_output(DataFrameFlowAnalysis)
+        flow_llm = with_structured_output(raw_llm, DataFrameFlowAnalysis)
 
         prompt = ChatPromptTemplate.from_messages(
             [

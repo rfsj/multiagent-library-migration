@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import get_llm
+from src.llm import get_llm, with_structured_output
 from src.tools.project_scanner import build_project_audit, scan_project
 
 load_dotenv()
@@ -174,8 +174,8 @@ class PlannerV3Agent:
             encoding="utf-8"
         )
         raw_llm = get_llm()
-        llm = raw_llm.with_structured_output(PlannerV3Plan)
-        analysis_llm = raw_llm.with_structured_output(PlannerV3SymbolAnalysisResult)
+        llm = with_structured_output(raw_llm, PlannerV3Plan)
+        analysis_llm = with_structured_output(raw_llm, PlannerV3SymbolAnalysisResult)
         self._chain = (
             ChatPromptTemplate.from_messages(
                 [
