@@ -66,8 +66,12 @@ def main() -> int:
                 "phase_status": report.get("phase_status", {}),
                 "planner_status": (report.get("phase_status") or {}).get("planner"),
                 "migration_status": (report.get("phase_status") or {}).get("migration"),
-                "validation_status": (report.get("phase_status") or {}).get("validation"),
-                "phase_failure_reason": (report.get("phase_status") or {}).get("reason"),
+                "validation_status": (report.get("phase_status") or {}).get(
+                    "validation"
+                ),
+                "phase_failure_reason": (report.get("phase_status") or {}).get(
+                    "reason"
+                ),
                 "final_validation_status": _final_validation_status(report),
                 "out_of_scope_changes": report.get("out_of_scope_changes"),
                 "unmigrated_uses": report.get("unmigrated_uses"),

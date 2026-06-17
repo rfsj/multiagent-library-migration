@@ -248,9 +248,7 @@ def _build_report(
         semantic_risks,
         verdicts,
     )
-    migration_step_summary = _migration_step_summary(
-        diagnosis, verdicts, failed_steps
-    )
+    migration_step_summary = _migration_step_summary(diagnosis, verdicts, failed_steps)
     phase_status = _phase_status(
         diagnosis=diagnosis,
         tests_before=tests_before,
@@ -341,9 +339,7 @@ def _phase_status(
     not_attempted_steps = migration_step_summary.get("not_attempted_steps") or 0
 
     planner_passed = bool(
-        diagnosis
-        and diagnosis.get("migration_steps")
-        and tests_before.get("passed")
+        diagnosis and diagnosis.get("migration_steps") and tests_before.get("passed")
     )
     migration_passed = bool(
         planner_passed
