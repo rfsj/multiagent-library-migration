@@ -302,8 +302,6 @@ def _render_planner_matrix(payload: dict[str, Any]) -> tuple[str, str]:
         ("affected_source_files", "Affected files", "plain"),
         ("llm_calls", "LLM calls", "plain"),
         ("duration_seconds", "Duration (s)", "plain"),
-        ("planner_warnings", "Warnings", "plain"),
-        ("run_dir", "Run dir", "path"),
     ]
 
     body = meta
@@ -454,7 +452,7 @@ def _table(
         row_class = ""
         if row_status_key is not None:
             row_class = _row_class(row.get(row_status_key))
-        cells = "".join(_cell(row.get(key), kind) for key, _, kind in columns)
+        cells = "".join(_cell(row.get(key), kind, label) for key, label, kind in columns)
         body_rows.append(f"<tr class='{row_class}'>{cells}</tr>")
 
     return (
@@ -472,18 +470,38 @@ def _row_class(value: Any) -> str:
     return ""
 
 
-def _cell(value: Any, kind: str) -> str:
+def _soft_break_html(text: str) -> str:
+    escaped = html.escape(text)
+    for token in ("/", "_", ";", ",", ":"):
+        escaped = escaped.replace(token, f"{token}<wbr>")
+    return escaped
+
+
+def _cell(value: Any, kind: str, label: str = "") -> str:
+    data_label = html.escape(label)
     if kind == "badge":
-        return f"<td>{_badge(value)}</td>"
+        return f"<td data-label='{data_label}'>{_badge(value)}</td>"
     if kind == "rate":
-        return f"<td>{_rate_bar(value)}</td>"
+        return f"<td data-label='{data_label}'>{_rate_bar(value)}</td>"
     if kind == "rate_inverted":
-        return f"<td>{_rate_bar(value, invert=True)}</td>"
+        return f"<td data-label='{data_label}'>{_rate_bar(value, invert=True)}</td>"
     if kind == "count":
-        return f"<td>{_count_badge(value)}</td>"
+        return f"<td data-label='{data_label}'>{_count_badge(value)}</td>"
     if kind == "path":
-        return f"<td class='path'>{html.escape(_text(value))}</td>"
-    return f"<td>{html.escape(_text(value))}</td>"
+        return f"<td data-label='{data_label}' class='path'>{_soft_break_html(_text(value))}</td>"
+    text = _text(value)
+    css = _cell_class(text)
+    return f"<td data-label='{data_label}' class='{css}'>{_soft_break_html(text)}</td>"
+
+
+def _cell_class(text: str) -> str:
+    if not text:
+        return "cell-empty"
+    if len(text) > 72 or ";" in text or " | " in text:
+        return "cell-long"
+    if "/" in text and len(text) > 28:
+        return "cell-pathish"
+    return "cell-plain"
 
 
 def _badge(value: Any) -> str:
@@ -593,35 +611,179 @@ body {
   background: #f5f6f8;
   color: #1c1f26;
   margin: 0;
-  padding: 2rem 1rem 4rem;
+  padding: 1.5rem 1rem 3rem;
 }
-main { max-width: 1100px; margin: 0 auto; }
-h1 { font-size: 1.6rem; margin-bottom: 1.2rem; }
-h2 { font-size: 1.1rem; margin: 0 0 0.6rem; color: #2a2f3a; }
-section { margin: 1.6rem 0; background: #fff; border: 1px solid #e3e5ea; border-radius: 10px; padding: 1.1rem 1.2rem; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
-table.meta { border-collapse: collapse; margin-bottom: 1.4rem; background: #fff; border: 1px solid #e3e5ea; border-radius: 10px; overflow: hidden; }
-table.meta th, table.meta td { padding: 0.45rem 0.9rem; text-align: left; font-size: 0.9rem; border-bottom: 1px solid #eef0f3; }
+main { max-width: 1480px; margin: 0 auto; }
+h1 { font-size: 1.45rem; margin-bottom: 1rem; }
+h2 { font-size: 1rem; margin: 0 0 0.55rem; color: #2a2f3a; }
+section { margin: 1.2rem 0; background: #fff; border: 1px solid #e3e5ea; border-radius: 8px; padding: 0.9rem 1rem; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+table.meta { border-collapse: collapse; width: 100%; margin-bottom: 1rem; background: #fff; border: 1px solid #e3e5ea; border-radius: 8px; overflow: hidden; table-layout: fixed; }
+table.meta th, table.meta td { padding: 0.42rem 0.75rem; text-align: left; font-size: 0.86rem; border-bottom: 1px solid #eef0f3; vertical-align: top; }
 table.meta th { color: #6b7280; font-weight: 600; white-space: nowrap; }
+table.meta td { overflow-wrap: anywhere; word-break: break-word; }
 table.meta tr:last-child th, table.meta tr:last-child td { border-bottom: none; }
-.table-wrap { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-thead th { position: sticky; top: 0; background: #2a2f3a; color: #fff; text-align: left; padding: 0.5rem 0.7rem; font-weight: 600; white-space: nowrap; }
-tbody td { padding: 0.45rem 0.7rem; border-bottom: 1px solid #eef0f3; white-space: nowrap; }
+.table-wrap { overflow-x: auto; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; min-width: 920px; font-size: 0.78rem; table-layout: fixed; }
+thead th { position: sticky; top: 0; background: #2a2f3a; color: #fff; text-align: left; padding: 0.42rem 0.5rem; font-weight: 600; white-space: normal; line-height: 1.15; vertical-align: bottom; }
+tbody td { padding: 0.38rem 0.5rem; border-bottom: 1px solid #eef0f3; white-space: normal; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; line-height: 1.25; }
 tbody tr:hover { background: #fafbfc; }
 tr.row-good { background: #f1faf4; }
 tr.row-bad { background: #fdf2f2; }
-td.path { white-space: normal; word-break: break-all; color: #6b7280; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-width: 360px; }
-.badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; }
+td.path, td.cell-pathish { color: #6b7280; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; overflow-wrap: anywhere; word-break: break-word; }
+td.cell-long { font-size: 0.72rem; color: #4b5563; max-width: 260px; }
+td.cell-empty { color: #9aa0ab; }
+td.cell-plain { max-width: 180px; }
+.badge { display: inline-block; padding: 0.12rem 0.42rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; line-height: 1.2; }
 .badge-green { background: #e3f6e9; color: #1f9d55; }
 .badge-red { background: #fbe7e7; color: #c0392b; }
 .badge-gray { background: #eceef1; color: #5b6270; }
-.bar-wrap { position: relative; width: 96px; height: 14px; background: #eceef1; border-radius: 7px; overflow: hidden; }
+.bar-wrap { position: relative; width: 68px; height: 12px; background: #eceef1; border-radius: 6px; overflow: hidden; }
 .bar { position: absolute; left: 0; top: 0; height: 100%; border-radius: 7px; }
-.bar-label { position: absolute; right: 6px; top: -2px; font-size: 0.68rem; color: #3a3f4a; }
+.bar-label { position: absolute; right: 4px; top: -1px; font-size: 0.6rem; color: #3a3f4a; }
 .muted { color: #9aa0ab; }
 .empty { color: #9aa0ab; font-style: italic; }
-.note { color: #5b6270; font-size: 0.85rem; background: #fff8e6; border: 1px solid #f3e2ad; border-radius: 8px; padding: 0.6rem 0.9rem; }
+.note { color: #5b6270; font-size: 0.82rem; background: #fff8e6; border: 1px solid #f3e2ad; border-radius: 8px; padding: 0.55rem 0.75rem; }
 footer { margin-top: 2.5rem; color: #9aa0ab; font-size: 0.78rem; text-align: center; }
+@media (max-width: 900px) {
+  body { padding: 1rem 0.5rem 2rem; }
+  section { padding: 0.75rem; }
+  table { min-width: 760px; }
+}
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    background: #fff;
+    padding: 0;
+    color: #151922;
+  }
+  main {
+    max-width: none;
+    width: 100%;
+  }
+  h1 {
+    font-size: 18pt;
+    margin: 0 0 8pt;
+  }
+  h2 {
+    font-size: 12pt;
+    margin-bottom: 7pt;
+  }
+  section {
+    border: 1px solid #d9dde5;
+    box-shadow: none;
+    border-radius: 6px;
+    padding: 8pt;
+    margin: 10pt 0;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  table.meta {
+    border-radius: 0;
+    margin-bottom: 8pt;
+  }
+  table.meta th,
+  table.meta td {
+    font-size: 9pt;
+    padding: 4pt 6pt;
+  }
+  table.meta th {
+    width: 28%;
+  }
+  .note {
+    font-size: 9pt;
+    padding: 6pt;
+    margin: 8pt 0;
+    border-radius: 4px;
+  }
+  .table-wrap {
+    overflow: visible;
+    width: 100%;
+    max-width: none;
+  }
+  table {
+    display: block;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0 6pt;
+    font-size: 8.5pt;
+    table-layout: auto;
+  }
+  thead {
+    display: none;
+  }
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+  tr {
+    border: 1px solid #dde2ea;
+    border-radius: 5px;
+    padding: 5pt 6pt;
+    margin: 0 0 6pt;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: #fff;
+  }
+  tr.row-good {
+    background: #f5fbf7;
+  }
+  tr.row-bad {
+    background: #fff4f4;
+    border-color: #efc7c7;
+  }
+  tbody td {
+    display: grid;
+    grid-template-columns: 92pt minmax(0, 1fr);
+    column-gap: 8pt;
+    border-bottom: 1px solid #edf0f4;
+    padding: 2.5pt 0;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
+    line-height: 1.25;
+  }
+  tbody td:last-child {
+    border-bottom: none;
+  }
+  tbody td::before {
+    content: attr(data-label);
+    color: #697181;
+    font-weight: 700;
+  }
+  td.cell-long,
+  td.cell-plain,
+  td.path,
+  td.cell-pathish {
+    max-width: none;
+    font-size: 8pt;
+  }
+  .badge {
+    font-size: 8pt;
+    padding: 1pt 5pt;
+    width: fit-content;
+  }
+  .bar-wrap {
+    width: 72pt;
+    height: 10pt;
+  }
+  .bar-label {
+    font-size: 7pt;
+    top: 0;
+  }
+  footer {
+    display: none;
+  }
+}
 """
 
 
