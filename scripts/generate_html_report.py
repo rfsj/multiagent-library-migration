@@ -249,6 +249,9 @@ def _render_matrix(payload: dict[str, Any]) -> tuple[str, str]:
         ("config", "Config", "plain"),
         ("attempt", "#", "plain"),
         ("success", "Success", "badge"),
+        ("planner_status", "Planner", "badge"),
+        ("migration_status", "Migration", "badge"),
+        ("validation_status", "Validation phase", "badge"),
         ("tests_after", "Tests", "badge"),
         ("final_validation", "Validation", "badge"),
         ("out_of_scope_changes", "Scope violations", "count"),
@@ -256,6 +259,7 @@ def _render_matrix(payload: dict[str, Any]) -> tuple[str, str]:
         ("retries", "Retries", "plain"),
         ("replans", "Replans", "plain"),
         ("llm_calls", "LLM calls", "plain"),
+        ("phase_failure_reason", "Phase reason", "plain"),
         ("run_dir", "Run dir", "path"),
     ]
 
@@ -539,6 +543,9 @@ def _render_full_eval(payload: dict[str, Any]) -> tuple[str, str]:
         ("attempt", "#", "plain"),
         ("success", "Success", "badge"),
         ("status", "Status", "badge"),
+        ("planner_status", "Planner", "badge"),
+        ("migration_status", "Migration", "badge"),
+        ("validation_status", "Validation phase", "badge"),
         ("tests_before", "Tests before", "badge"),
         ("tests_after", "Tests after", "badge"),
         ("final_validation_status", "Validation", "badge"),
@@ -546,6 +553,7 @@ def _render_full_eval(payload: dict[str, Any]) -> tuple[str, str]:
         ("unmigrated_uses", "Unmigrated uses", "count"),
         ("total_retries", "Retries", "plain"),
         ("replan_count", "Replans", "plain"),
+        ("phase_failure_reason", "Phase reason", "plain"),
         ("run_dir", "Run dir", "path"),
     ]
     attempt_rows = []

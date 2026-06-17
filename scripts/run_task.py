@@ -248,6 +248,17 @@ def _build_report(
         semantic_risks,
         verdicts,
     )
+    migration_step_summary = _migration_step_summary(
+        diagnosis, verdicts, failed_steps
+    )
+    phase_status = _phase_status(
+        diagnosis=diagnosis,
+        tests_before=tests_before,
+        tests_after=tests_after,
+        final_validation=final_validation,
+        migration_step_summary=migration_step_summary,
+        abort_reason=abort_reason,
+    )
     return {
         "task_id": metadata["task_id"],
         "source_library": metadata["source_library"],
@@ -270,9 +281,8 @@ def _build_report(
         "verdicts": verdicts,
         "retry_counts": retry_counts,
         "failed_steps": failed_steps,
-        "migration_step_summary": _migration_step_summary(
-            diagnosis, verdicts, failed_steps
-        ),
+        "migration_step_summary": migration_step_summary,
+        "phase_status": phase_status,
         "abort_reason": abort_reason,
         "replan_count": replan_count,
         "replan_history": replan_history,
@@ -314,6 +324,82 @@ def _migration_step_summary(
         "failed_step_ids": failed,
         "not_attempted_step_ids": not_attempted,
     }
+
+
+def _phase_status(
+    *,
+    diagnosis: dict | None,
+    tests_before: dict,
+    tests_after: dict,
+    final_validation: dict,
+    migration_step_summary: dict,
+    abort_reason: str | None,
+) -> dict:
+    planned_steps = migration_step_summary.get("planned_steps") or 0
+    accepted_steps = migration_step_summary.get("accepted_steps") or 0
+    failed_steps = migration_step_summary.get("failed_steps") or 0
+    not_attempted_steps = migration_step_summary.get("not_attempted_steps") or 0
+
+    planner_passed = bool(
+        diagnosis
+        and diagnosis.get("migration_steps")
+        and tests_before.get("passed")
+    )
+    migration_passed = bool(
+        planner_passed
+        and not abort_reason
+        and planned_steps > 0
+        and accepted_steps == planned_steps
+        and failed_steps == 0
+        and not_attempted_steps == 0
+        and tests_after.get("passed")
+    )
+    validation_passed = bool(
+        migration_passed and final_validation.get("status") == "approved"
+    )
+    return {
+        "planner": "passed" if planner_passed else "failed",
+        "migration": "passed" if migration_passed else "failed",
+        "validation": "passed" if validation_passed else "failed",
+        "tests_before": "passed" if tests_before.get("passed") else "failed",
+        "tests_after": "passed" if tests_after.get("passed") else "failed",
+        "final_validation": final_validation.get("status"),
+        "reason": _phase_failure_reason(
+            planner_passed=planner_passed,
+            migration_passed=migration_passed,
+            validation_passed=validation_passed,
+            abort_reason=abort_reason,
+            migration_step_summary=migration_step_summary,
+            final_validation=final_validation,
+        ),
+    }
+
+
+def _phase_failure_reason(
+    *,
+    planner_passed: bool,
+    migration_passed: bool,
+    validation_passed: bool,
+    abort_reason: str | None,
+    migration_step_summary: dict,
+    final_validation: dict,
+) -> str | None:
+    if validation_passed:
+        return None
+    if not planner_passed:
+        return "Planner did not produce an executable migration plan."
+    if abort_reason:
+        return abort_reason
+    if not migration_passed:
+        failed = migration_step_summary.get("failed_step_ids") or []
+        not_attempted = migration_step_summary.get("not_attempted_step_ids") or []
+        details = []
+        if failed:
+            details.append("failed steps: " + ", ".join(failed))
+        if not_attempted:
+            details.append("not attempted steps: " + ", ".join(not_attempted))
+        return "; ".join(details) or "Migration did not accept every planned step."
+    return f"Final validation status: {final_validation.get('status')}"
 
 
 if __name__ == "__main__":

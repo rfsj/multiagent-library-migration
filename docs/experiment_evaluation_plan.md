@@ -635,8 +635,10 @@ rejection_rate | avg_llm_calls | avg_duration_seconds
 
 ```text
 run_level.csv:
-task_id | config | attempt | success | tests_after | final_validation |
-out_of_scope_changes | unmigrated_uses | retries | replans | llm_calls | run_dir
+task_id | config | attempt | success | planner_status | migration_status |
+validation_status | tests_after | final_validation | out_of_scope_changes |
+unmigrated_uses | retries | replans | llm_calls | phase_failure_reason |
+run_dir
 ```
 
 ```text

@@ -83,6 +83,9 @@ RUN_LEVEL_COLUMNS = [
     "config",
     "attempt",
     "success",
+    "planner_status",
+    "migration_status",
+    "validation_status",
     "tests_after",
     "final_validation",
     "out_of_scope_changes",
@@ -90,6 +93,7 @@ RUN_LEVEL_COLUMNS = [
     "retries",
     "replans",
     "llm_calls",
+    "phase_failure_reason",
     "run_dir",
 ]
 
@@ -296,6 +300,9 @@ def _build_run_level_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, An
                     "config": config_name,
                     "attempt": attempt.get("attempt"),
                     "success": attempt.get("success"),
+                    "planner_status": attempt.get("planner_status"),
+                    "migration_status": attempt.get("migration_status"),
+                    "validation_status": attempt.get("validation_status"),
                     "tests_after": attempt.get("tests_after"),
                     "final_validation": attempt.get("final_validation_status"),
                     "out_of_scope_changes": attempt.get("out_of_scope_changes"),
@@ -303,6 +310,7 @@ def _build_run_level_rows(full_evals: list[dict[str, Any]]) -> list[dict[str, An
                     "retries": attempt.get("total_retries"),
                     "replans": attempt.get("replan_count"),
                     "llm_calls": attempt.get("llm_calls", {}).get("total"),
+                    "phase_failure_reason": attempt.get("phase_failure_reason"),
                     "run_dir": attempt.get("run_dir"),
                 }
             )
