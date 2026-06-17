@@ -4,5 +4,8 @@ services:
     image: multiagent-library-migration
     env_file:
       - .env
+    working_dir: /app
     volumes:
       - ./experiments/runs:/app/experiments/runs
+      - ./experiments/evaluations:/app/experiments/evaluations
+    command: ["python", "scripts/run_task.py", "task_001_read_csv_filter"]

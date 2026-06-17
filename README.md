@@ -66,7 +66,31 @@ Para executar no Docker preservando os artefatos no diretório local
 make docker-run
 ```
 
-Os resultados são gravados em `experiments/runs/`.
+Os resultados são gravados em `experiments/runs/`. Para avaliações replicáveis
+com HTML, configure `.env` a partir de `.env.example` e rode:
+
+```bash
+TASK_ID=task_020_full_analytics_pipeline ATTEMPTS=3 K=1,3 make docker-full-eval
+LATEST_MATRIX=$(ls -td experiments/evaluations/matrix_* | head -1)
+docker compose run --rm migration-runner \
+  python scripts/generate_html_report.py "$LATEST_MATRIX"
+```
+
+O relatório HTML ficará em `experiments/evaluations/<matrix>/report.html`.
+Avaliações isoladas também podem ser replicadas via Docker:
+
+```bash
+# 1. Diagnóstico/planner
+TASK_ID=task_020_full_analytics_pipeline ATTEMPTS=3 K=1,3 make docker-planner-eval
+
+# 2. Migração, consumindo planos congelados do planner
+PLANNER_MATRIX=$(ls -td experiments/evaluations/planner_matrix_* | head -1)
+PLANNER_MATRIX=$PLANNER_MATRIX K=1,3 make docker-migration-eval
+
+# 3. Validação, consumindo runs migradas
+RUNS=$(ls -td experiments/evaluations/migration_matrix_* | head -1)
+RUNS=$RUNS make docker-validation-eval
+```
 
 ## Importar Projeto Real
 
