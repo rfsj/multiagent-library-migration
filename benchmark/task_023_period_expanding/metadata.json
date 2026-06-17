@@ -7,6 +7,11 @@
     "src/metrics/timeseries.py",
     "requirements.txt"
   ],
+  "validation_oracle": {
+    "expected_verdict": "approved",
+    "expected_rejection_reasons": [],
+    "must_detect": []
+  },
   "validity_oracle": {
     "required_source_files": [
       "src/metrics/timeseries.py"

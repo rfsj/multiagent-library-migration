@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
@@ -55,8 +56,16 @@ def get_llm() -> BaseChatModel:
             kwargs["request_timeout"] = timeout
         return ChatGoogleGenerativeAI(**kwargs)
 
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+
+        kwargs = {"model": model, "callbacks": callbacks}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return ChatOpenAI(**kwargs)
+
     raise ValueError(
-        f"Unsupported LLM_PROVIDER '{provider}'. Valid values: 'anthropic', 'google'."
+        f"Unsupported LLM_PROVIDER '{provider}'. Valid values: 'anthropic', 'google', 'openai'."
     )
 
 
@@ -66,6 +75,20 @@ def get_llm_request_timeout_seconds() -> float | None:
         return None
     timeout = float(raw)
     return timeout if timeout > 0 else None
+
+
+def get_structured_output_method() -> str | None:
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if provider == "openai":
+        return "function_calling"
+    return None
+
+
+def with_structured_output(llm: BaseChatModel, schema: Any) -> Any:
+    method = get_structured_output_method()
+    if method is None:
+        return llm.with_structured_output(schema)
+    return llm.with_structured_output(schema, method=method)
 
 
 def is_llm_timeout_error(exc: BaseException) -> bool:

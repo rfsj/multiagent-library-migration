@@ -32,6 +32,8 @@ RUN_LEVEL_COLUMNS = [
     "rejection_reason_match",
     "expected_rejection_reasons",
     "observed_rejection_reasons",
+    "must_detect",
+    "must_detect_match",
     "tests_passed",
     "final_validation_status",
     "out_of_scope_changes",
@@ -197,6 +199,8 @@ def _build_run_level_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "observed_rejection_reasons": ";".join(
                     metrics.get("observed_rejection_reasons") or []
                 ),
+                "must_detect": ";".join(metrics.get("must_detect") or []),
+                "must_detect_match": metrics.get("must_detect_match"),
                 "tests_passed": metrics.get("tests_passed"),
                 "final_validation_status": metrics.get("final_validation_status"),
                 "out_of_scope_changes": metrics.get("out_of_scope_changes"),

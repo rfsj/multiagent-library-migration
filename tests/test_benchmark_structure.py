@@ -83,8 +83,7 @@ def test_scanner_disables_source_usage_detection_without_ast(tmp_path):
 def test_planner_allowed_symbol_validation_can_skip_ast(tmp_path):
     source = tmp_path / "processing.py"
     source.write_text(
-        "def existing():\n"
-        "    return 1\n",
+        "def existing():\n    return 1\n",
         encoding="utf-8",
     )
     warnings: list[str] = []

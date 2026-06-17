@@ -13,7 +13,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from src.llm import format_llm_timeout_error, get_llm, is_llm_timeout_error
+from src.llm import (
+    format_llm_timeout_error,
+    get_llm,
+    is_llm_timeout_error,
+    with_structured_output,
+)
 from src.migration_config import MigrationConfig
 from src.tools.ast_transformer import apply_ast_transforms
 from src.tools.pattern_scanner import (
@@ -213,7 +218,7 @@ class MigrationAgent:
         # CoT on -> bind the schema where migration_plan is REQUIRED, forcing the
         # model to emit it. CoT off -> base schema has no migration_plan at all.
         result_schema = MigrationResultCoT if self._config.use_cot else MigrationResult
-        llm = get_llm().with_structured_output(result_schema)
+        llm = with_structured_output(get_llm(), result_schema)
         messages: list[Any] = [SystemMessage(content=system_prompt)]
         if self._config.use_few_shot:
             messages.extend(_few_shot_messages(include_plan=self._config.use_cot))

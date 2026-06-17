@@ -45,9 +45,10 @@ python3 -m pytest tests/ -q
 ## Configuração (.env)
 
 ```env
-LLM_PROVIDER=google          # ou "anthropic"
+LLM_PROVIDER=google          # ou "anthropic" ou "openai"
 LLM_MODEL=gemini-3.1-flash-lite
 GOOGLE_API_KEY=...
+# OPENAI_API_KEY=...
 MIGRATION_MODE=research      # research | research_cot | research_fewshot | research_cot_fewshot | assisted
 ```
 

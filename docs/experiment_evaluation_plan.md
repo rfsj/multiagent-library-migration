@@ -346,6 +346,11 @@ For successful migrations:
 }
 ```
 
+`validation_oracle` belongs in `benchmark/<task_id>/metadata.json` next to the
+other task-level labels. It complements `validity_oracle`: `validity_oracle`
+labels planner / structural expectations for a task, while `validation_oracle`
+labels what the Validation Agent should conclude for a completed run.
+
 ### Single Validation Run
 
 ```bash
@@ -380,6 +385,8 @@ validation_metrics.false_accept
 validation_metrics.false_reject
 validation_metrics.rejection_reason_match
 validation_metrics.observed_rejection_reasons
+validation_metrics.must_detect
+validation_metrics.must_detect_match
 ```
 
 ### Validation Matrix

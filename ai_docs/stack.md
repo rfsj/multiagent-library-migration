@@ -23,12 +23,14 @@ O provider é configurado via `LLM_PROVIDER` e `LLM_MODEL` no `.env`:
 |---|---|---|
 | Google | `LLM_PROVIDER=google` + `GOOGLE_API_KEY` | `gemini-3.1-flash-lite` (recomendado), `gemini-2.5-flash`, `gemini-2.5-pro` |
 | Anthropic | `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| OpenAI | `LLM_PROVIDER=openai` + `OPENAI_API_KEY` | `gpt-4o-mini`, `gpt-4o` |
 
 **Guia de seleção de modelo:**
 
 - `gemini-3.1-flash-lite` + `MIGRATION_AST_FALLBACK=1` — melhor custo/benefício para a maioria das tasks
 - `gemini-2.5-pro` — maior qualidade, pode dar timeout 504 em arquivos grandes (>200 linhas)
 - `claude-sonnet-4-6` — alternativa robusta via Anthropic
+- `gpt-4o-mini` — alternativa via OpenAI com custo menor que `gpt-4o`
 
 ## Bibliotecas de Migração (domínio)
 

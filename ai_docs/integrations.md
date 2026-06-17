@@ -39,6 +39,26 @@ ANTHROPIC_API_KEY=<sua-chave>
 
 ---
 
+### OpenAI (alternativa)
+
+**Tipo**: API HTTP (via `langchain_openai`)
+
+**Configuração**:
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=<sua-chave>
+```
+
+**Instalação**:
+```bash
+pip install -e ".[openai]"
+```
+
+**Uso**: O framework usa `ChatOpenAI` via `src/llm.py`; o structured output continua via LangChain e o `llm_proxy.jsonl` já captura respostas OpenAI pelo campo `tool_calls`.
+
+---
+
 ## Dependências Externas de Execução
 
 ### pytest (dos projetos migrados)
@@ -151,12 +171,12 @@ O sistema foi projetado para ser extensível:
 
 Principais (do `pyproject.toml`):
 ```
-langchain
 langgraph
-langchain-anthropic
 langchain-google-genai
-pydantic>=2
+langchain-anthropic (extra opcional)
+langchain-openai (extra opcional)
 python-dotenv
+pytest
 ```
 
 Dependências de desenvolvimento:
