@@ -1,0 +1,32 @@
+{
+  "agent": "reference_fixture",
+  "task_id": "task_001_read_csv_filter",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "step_kind": "dependency_update",
+      "description": "Allow the migrated project to use the target dataframe library.",
+      "file": "requirements.txt",
+      "files": [
+        "requirements.txt"
+      ],
+      "allowed_files": [
+        "requirements.txt"
+      ]
+    },
+    {
+      "step_id": "step_002",
+      "step_kind": "source_migration",
+      "description": "Migrate order dataframe operations from pandas to polars.",
+      "file": "src/orders/processing.py",
+      "files": [
+        "src/orders/processing.py"
+      ],
+      "allowed_files": [
+        "src/orders/processing.py"
+      ]
+    }
+  ]
+}

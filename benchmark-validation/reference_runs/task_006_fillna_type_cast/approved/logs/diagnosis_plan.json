@@ -1,0 +1,229 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/inventory/processing.py"
+  ],
+  "affected_source_files": [
+    "src/inventory/processing.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_processing.py"
+  ],
+  "complexity": {
+    "src/inventory/processing.py": "low"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/inventory/processing.py",
+        "symbols": [
+          {
+            "name": "available_items",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "fillna",
+              "astype",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.read_csv to create dataframe",
+              "accesses columns sku, name, stock, price",
+              "uses fillna, astype, sort_values"
+            ]
+          },
+          {
+            "name": "out_of_stock_items",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "fillna",
+              "astype",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.read_csv to create dataframe",
+              "accesses columns sku, name, stock",
+              "uses fillna, astype, sort_values"
+            ]
+          },
+          {
+            "name": "expensive_items",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "fillna",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.read_csv to create dataframe",
+              "accesses columns sku, name, price",
+              "uses fillna, sort_values"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/inventory/processing.py",
+        "symbol": "available_items",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/inventory/processing.py",
+        "symbol": "out_of_stock_items",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/inventory/processing.py",
+        "symbol": "expensive_items",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Added requirements.txt to the first migration step because the target dependency is not present."
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/inventory/processing.py",
+      "description": "Migrate available_items function from pandas to polars.",
+      "allowed_files": [
+        "src/inventory/processing.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "available_items"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_002",
+      "file": "src/inventory/processing.py",
+      "description": "Migrate out_of_stock_items function from pandas to polars.",
+      "allowed_files": [
+        "src/inventory/processing.py"
+      ],
+      "allowed_symbols": [
+        "out_of_stock_items"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_003",
+      "file": "src/inventory/processing.py",
+      "description": "Migrate expensive_items function from pandas to polars.",
+      "allowed_files": [
+        "src/inventory/processing.py"
+      ],
+      "allowed_symbols": [
+        "expensive_items"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_004",
+      "file": "requirements.txt",
+      "description": "Update dependencies from pandas to polars.",
+      "allowed_files": [
+        "requirements.txt"
+      ],
+      "allowed_symbols": [],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    }
+  ],
+  "human_review_required": false,
+  "human_review_reasons": []
+}

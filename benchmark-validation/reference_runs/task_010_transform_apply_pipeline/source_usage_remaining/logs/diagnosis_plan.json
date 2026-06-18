@@ -1,0 +1,44 @@
+{
+  "agent": "reference_fixture",
+  "task_id": "task_010_transform_apply_pipeline",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "step_kind": "dependency_update",
+      "description": "Reference dependency migration scope.",
+      "file": "requirements.txt",
+      "files": [
+        "requirements.txt"
+      ],
+      "allowed_files": [
+        "requirements.txt"
+      ]
+    },
+    {
+      "step_id": "step_002",
+      "step_kind": "source_migration",
+      "description": "Reference source migration scope.",
+      "file": "src/scoring/features.py",
+      "files": [
+        "src/scoring/features.py"
+      ],
+      "allowed_files": [
+        "src/scoring/features.py"
+      ]
+    },
+    {
+      "step_id": "step_003",
+      "step_kind": "source_migration",
+      "description": "Reference source migration scope.",
+      "file": "src/scoring/pipeline.py",
+      "files": [
+        "src/scoring/pipeline.py"
+      ],
+      "allowed_files": [
+        "src/scoring/pipeline.py"
+      ]
+    }
+  ]
+}

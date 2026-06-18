@@ -169,6 +169,15 @@ def _load_migration_matrix(dir_path: Path, report_path: Path) -> dict[str, Any]:
 def _load_validation_matrix(dir_path: Path, report_path: Path) -> dict[str, Any]:
     payload = json.loads(report_path.read_text(encoding="utf-8"))
     payload["_run_rows"] = _read_csv(dir_path / "validation_run_level.csv")
+    for row in payload["_run_rows"]:
+        if not row.get("case_id"):
+            source = Path(row.get("source_run_dir") or row.get("run_dir") or "")
+            parts = source.parts
+            if "reference_runs" in parts:
+                index = parts.index("reference_runs")
+                row["case_id"] = str(Path(*parts[index + 1 :]))
+            else:
+                row["case_id"] = source.name
     payload["_summary_rows"] = _read_csv(dir_path / "validation_summary.csv")
     return payload
 
@@ -485,6 +494,7 @@ def _render_validation_matrix(payload: dict[str, Any]) -> tuple[str, str]:
     ]
     run_cols = [
         ("task_id", "Task", "plain"),
+        ("case_id", "Case", "plain"),
         ("oracle_available", "Oracle", "badge"),
         ("expected_verdict", "Expected", "badge"),
         ("observed_verdict", "Observed", "badge"),

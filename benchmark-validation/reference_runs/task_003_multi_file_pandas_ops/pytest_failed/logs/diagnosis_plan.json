@@ -1,0 +1,433 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/analytics/loaders.py",
+    "src/analytics/quality.py",
+    "src/analytics/summaries.py"
+  ],
+  "affected_source_files": [
+    "src/analytics/loaders.py",
+    "src/analytics/quality.py",
+    "src/analytics/summaries.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_analytics.py"
+  ],
+  "complexity": {
+    "src/analytics/loaders.py": "low",
+    "src/analytics/quality.py": "medium",
+    "src/analytics/summaries.py": "high"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/analytics/loaders.py",
+        "symbols": [
+          {
+            "name": "load_orders",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "fillna",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.read_csv",
+              "Column arithmetic for revenue",
+              "Uses sort_values and reset_index"
+            ]
+          },
+          {
+            "name": "load_customers",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "fillna",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.read_csv",
+              "Uses fillna on signup_region"
+            ]
+          },
+          {
+            "name": "paid_orders",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "copy"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_orders"
+            ],
+            "consumes_dataframe_from": [
+              "load_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses load_orders",
+              "Filters DataFrame by status"
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "file": "src/analytics/quality.py",
+        "symbols": [
+          {
+            "name": "latest_order_per_customer",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values",
+              "drop_duplicates"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_orders"
+            ],
+            "consumes_dataframe_from": [
+              "load_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses load_orders",
+              "Uses drop_duplicates"
+            ]
+          },
+          {
+            "name": "invalid_order_rows",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "isna",
+              "isin",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_orders"
+            ],
+            "consumes_dataframe_from": [
+              "load_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses load_orders",
+              "Boolean indexing with isna/isin"
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "file": "src/analytics/summaries.py",
+        "symbols": [
+          {
+            "name": "revenue_by_region",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "groupby",
+              "agg",
+              "sort_values",
+              "reset_index",
+              "round"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "paid_orders"
+            ],
+            "consumes_dataframe_from": [
+              "paid_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses groupby and agg",
+              "Uses paid_orders"
+            ]
+          },
+          {
+            "name": "customer_lifetime_value",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "groupby",
+              "agg",
+              "merge",
+              "fillna",
+              "round",
+              "apply",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_customers",
+              "paid_orders"
+            ],
+            "consumes_dataframe_from": [
+              "load_customers",
+              "paid_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses load_customers and paid_orders",
+              "Performs merge and apply transformation"
+            ]
+          },
+          {
+            "name": "monthly_product_matrix",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "pivot_table",
+              "reset_index",
+              "round",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "paid_orders"
+            ],
+            "consumes_dataframe_from": [
+              "paid_orders"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.pivot_table",
+              "Accesses datetime accessor dt"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/analytics/loaders.py",
+        "symbol": "load_orders",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/loaders.py",
+        "symbol": "load_customers",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/loaders.py",
+        "symbol": "paid_orders",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_orders"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/quality.py",
+        "symbol": "latest_order_per_customer",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_orders"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/quality.py",
+        "symbol": "invalid_order_rows",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_orders"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/summaries.py",
+        "symbol": "revenue_by_region",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "paid_orders"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/summaries.py",
+        "symbol": "customer_lifetime_value",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_customers",
+          "paid_orders"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/summaries.py",
+        "symbol": "monthly_product_matrix",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "paid_orders"
+        ],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [
+      {
+        "group_id": "flow_group_001",
+        "files": [
+          "src/analytics/loaders.py",
+          "src/analytics/quality.py",
+          "src/analytics/summaries.py"
+        ],
+        "symbols": [
+          "customer_lifetime_value",
+          "invalid_order_rows",
+          "latest_order_per_customer",
+          "load_customers",
+          "load_orders",
+          "monthly_product_matrix",
+          "paid_orders",
+          "revenue_by_region"
+        ],
+        "reason": "Symbol analysis found DataFrame-like values produced in one of these files and consumed in another.",
+        "planning_strategy": "grouped_before_consumers"
+      }
+    ],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Kept src/analytics/loaders.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Kept src/analytics/quality.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Kept src/analytics/summaries.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Grouped DataFrame flow files into one atomic migration step: src/analytics/loaders.py, src/analytics/quality.py, src/analytics/summaries.py",
+    "Added requirements.txt to the first migration step because the target dependency is not present."
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/analytics/loaders.py",
+      "description": "Migrate coupled DataFrame flow (3 files atomically).",
+      "allowed_files": [
+        "src/analytics/loaders.py",
+        "src/analytics/quality.py",
+        "src/analytics/summaries.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [],
+      "files": [
+        "src/analytics/loaders.py",
+        "src/analytics/quality.py",
+        "src/analytics/summaries.py"
+      ],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "grouped"
+    },
+    {
+      "step_id": "step_002",
+      "file": "requirements.txt",
+      "description": "Update dependencies to include polars.",
+      "allowed_files": [
+        "requirements.txt"
+      ],
+      "allowed_symbols": [],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    }
+  ],
+  "human_review_required": false,
+  "human_review_reasons": []
+}

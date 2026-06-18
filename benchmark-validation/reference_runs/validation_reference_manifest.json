@@ -1,0 +1,26 @@
+{
+  "suite_id": "validation_reference_runs",
+  "description": "Versioned reference runs for isolated ValidationAgent evaluation. Cases are ordered by task_id and case type.",
+  "runs": [
+    "task_001_read_csv_filter/approved",
+    "task_001_read_csv_filter/pytest_failed",
+    "task_001_read_csv_filter/out_of_scope_change",
+    "task_001_read_csv_filter/source_usage_remaining",
+    "task_002_complex_pandas_ops/pytest_failed",
+    "task_002_complex_pandas_ops/source_usage_remaining",
+    "task_003_multi_file_pandas_ops/pytest_failed",
+    "task_003_multi_file_pandas_ops/source_usage_remaining",
+    "task_004_join_window_pipeline/pytest_failed",
+    "task_004_join_window_pipeline/source_usage_remaining",
+    "task_005_time_series_resampling/pytest_failed",
+    "task_005_time_series_resampling/source_usage_remaining",
+    "task_006_fillna_type_cast/approved",
+    "task_006_fillna_type_cast/source_usage_remaining",
+    "task_007_string_operations/pytest_failed",
+    "task_007_string_operations/source_usage_remaining",
+    "task_008_period_expanding/source_usage_remaining",
+    "task_009_concat_where/source_usage_remaining",
+    "task_010_transform_apply_pipeline/source_usage_remaining",
+    "task_011_hurst/source_usage_remaining"
+  ]
+}

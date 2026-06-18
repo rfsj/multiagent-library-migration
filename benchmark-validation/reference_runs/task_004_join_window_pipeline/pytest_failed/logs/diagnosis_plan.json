@@ -1,0 +1,391 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/retention/features.py",
+    "src/retention/loaders.py"
+  ],
+  "affected_source_files": [
+    "src/retention/features.py",
+    "src/retention/loaders.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_retention.py"
+  ],
+  "complexity": {
+    "src/retention/features.py": "high",
+    "src/retention/loaders.py": "low"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/retention/features.py",
+        "symbols": [
+          {
+            "name": "user_activity_summary",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "groupby",
+              "agg",
+              "sort_values",
+              "merge",
+              "fillna",
+              "astype",
+              "round",
+              "dt.days",
+              "apply"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_users",
+              "valid_events"
+            ],
+            "consumes_dataframe_from": [
+              "load_users",
+              "valid_events"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "uses pandas grouping/agg and merges",
+              "transforms result using column access and dt accessor"
+            ]
+          },
+          {
+            "name": "first_touch_revenue",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values",
+              "drop_duplicates",
+              "groupby",
+              "agg",
+              "merge",
+              "fillna",
+              "round",
+              "astype"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "valid_events"
+            ],
+            "consumes_dataframe_from": [
+              "valid_events"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "uses pandas dataframe filtering and aggregation"
+            ]
+          },
+          {
+            "name": "weekly_cohort_retention",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "dt.floor",
+              "drop_duplicates",
+              "merge",
+              "dt.strftime",
+              "dt.days",
+              "notna",
+              "pivot_table",
+              "reset_index",
+              "astype",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_users",
+              "valid_events"
+            ],
+            "consumes_dataframe_from": [
+              "load_users",
+              "valid_events"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.pivot_table and datetime accessors"
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "file": "src/retention/loaders.py",
+        "symbols": [
+          {
+            "name": "load_events",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "str.strip",
+              "str.lower",
+              "fillna",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.read_csv and pandas string/datetime accessors"
+            ]
+          },
+          {
+            "name": "load_users",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "fillna",
+              "str.upper",
+              "str.lower",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "uses pd.read_csv and column-wise operations"
+            ]
+          },
+          {
+            "name": "valid_events",
+            "kind": "function",
+            "explicit_source_usage": false,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "notna",
+              "isin",
+              "copy"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_events"
+            ],
+            "consumes_dataframe_from": [
+              "load_events"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "filters events by time and name list"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/retention/features.py",
+        "symbol": "user_activity_summary",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_users",
+          "valid_events"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/retention/features.py",
+        "symbol": "first_touch_revenue",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "valid_events"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/retention/features.py",
+        "symbol": "weekly_cohort_retention",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_users",
+          "valid_events"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/retention/loaders.py",
+        "symbol": "load_events",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/retention/loaders.py",
+        "symbol": "load_users",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/retention/loaders.py",
+        "symbol": "valid_events",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_events"
+        ],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [
+      {
+        "group_id": "flow_group_001",
+        "files": [
+          "src/retention/features.py",
+          "src/retention/loaders.py"
+        ],
+        "symbols": [
+          "first_touch_revenue",
+          "load_events",
+          "load_users",
+          "user_activity_summary",
+          "valid_events",
+          "weekly_cohort_retention"
+        ],
+        "reason": "Symbol analysis found DataFrame-like values produced in one of these files and consumed in another.",
+        "planning_strategy": "grouped_before_consumers"
+      }
+    ],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Kept src/retention/loaders.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Grouped DataFrame flow files into one atomic migration step: src/retention/loaders.py, src/retention/features.py"
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/retention/loaders.py",
+      "description": "Migrate coupled DataFrame flow (2 files atomically).",
+      "allowed_files": [
+        "src/retention/loaders.py",
+        "requirements.txt",
+        "src/retention/features.py"
+      ],
+      "allowed_symbols": [],
+      "files": [
+        "src/retention/loaders.py",
+        "src/retention/features.py"
+      ],
+      "risk_level": "low",
+      "risk_factors": [
+        "datetime parsing differences",
+        "string method behavior"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "grouped"
+    },
+    {
+      "step_id": "step_002",
+      "file": "src/retention/features.py",
+      "description": "Migrate revenue features calculation.",
+      "allowed_files": [
+        "src/retention/features.py"
+      ],
+      "allowed_symbols": [
+        "first_touch_revenue"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "drop_duplicates logic"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_003",
+      "file": "src/retention/features.py",
+      "description": "Migrate weekly cohort retention calculation.",
+      "allowed_files": [
+        "src/retention/features.py"
+      ],
+      "allowed_symbols": [
+        "weekly_cohort_retention"
+      ],
+      "files": [],
+      "risk_level": "high",
+      "risk_factors": [
+        "pivot_table replacement in polars",
+        "datetime floor and arithmetic operations"
+      ],
+      "requires_human_review": true,
+      "human_review_reasons": [
+        "pivot logic requires different architectural approach in polars"
+      ],
+      "status": "planned",
+      "step_type": "single_file"
+    }
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "step_003 (src/retention/features.py): pivot logic requires different architectural approach in polars"
+  ]
+}

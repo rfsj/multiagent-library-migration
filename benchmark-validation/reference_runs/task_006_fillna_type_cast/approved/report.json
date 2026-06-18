@@ -1,0 +1,7 @@
+{
+  "task_id": "task_006_fillna_type_cast",
+  "reference_case_id": "approved",
+  "phase": "validation_reference",
+  "source_run_dir": "experiments/runs/task_006_fillna_type_cast_20260617T031124Z_migration",
+  "description": "Existing migrated run approved by validation; copied as a validation reference fixture."
+}

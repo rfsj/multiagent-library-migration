@@ -1,0 +1,7 @@
+{
+  "task_id": "task_004_join_window_pipeline",
+  "reference_case_id": "pytest_failed",
+  "phase": "validation_reference",
+  "source_run_dir": "experiments/runs/task_004_join_window_pipeline_20260617T031020Z_migration",
+  "description": "Existing migrated run rejected by pytest; copied as a validation reference fixture."
+}

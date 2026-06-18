@@ -1,0 +1,6 @@
+{
+  "task_id": "task_001_read_csv_filter",
+  "reference_case_id": "approved",
+  "phase": "validation_reference",
+  "description": "Correct pandas-to-polars migration with only allowed files changed."
+}

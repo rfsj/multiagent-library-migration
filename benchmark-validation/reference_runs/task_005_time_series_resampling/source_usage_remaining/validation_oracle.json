@@ -1,0 +1,8 @@
+{
+  "expected_verdict": "rejected",
+  "expected_rejection_reasons": [
+    "old_imports_remaining",
+    "unmigrated_uses"
+  ],
+  "must_detect": []
+}

@@ -1,0 +1,32 @@
+{
+  "agent": "reference_fixture",
+  "task_id": "task_011_hurst",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "step_kind": "dependency_update",
+      "description": "Reference dependency migration scope.",
+      "file": "requirements.txt",
+      "files": [
+        "requirements.txt"
+      ],
+      "allowed_files": [
+        "requirements.txt"
+      ]
+    },
+    {
+      "step_id": "step_002",
+      "step_kind": "source_migration",
+      "description": "Reference source migration scope.",
+      "file": "hurst/__init__.py",
+      "files": [
+        "hurst/__init__.py"
+      ],
+      "allowed_files": [
+        "hurst/__init__.py"
+      ]
+    }
+  ]
+}

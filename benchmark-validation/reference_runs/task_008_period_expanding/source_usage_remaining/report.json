@@ -1,0 +1,6 @@
+{
+  "task_id": "task_008_period_expanding",
+  "reference_case_id": "source_usage_remaining",
+  "phase": "validation_reference",
+  "description": "Original unmigrated project; tests may pass but production source-library usage remains."
+}

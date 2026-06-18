@@ -1,0 +1,6 @@
+{
+  "task_id": "task_001_read_csv_filter",
+  "reference_case_id": "source_usage_remaining",
+  "phase": "validation_reference",
+  "description": "Tests pass, but production code still imports and uses pandas."
+}

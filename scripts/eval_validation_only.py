@@ -79,10 +79,12 @@ def main() -> int:
         "environment": env_snapshot(),
         "duration_seconds": round(time.perf_counter() - started, 3),
     }
+    local_metadata = _local_validation_metadata(run_dir)
     task_id = args.task_id or _task_id_from_run_dir(run_dir)
     if task_id:
         output["task_id"] = task_id
         metadata = load_task_metadata(task_id)
+        metadata.update(local_metadata)
         output["validation_metrics"] = evaluate_validation_result(
             validation_report=output,
             metadata=metadata,
@@ -90,7 +92,7 @@ def main() -> int:
     else:
         output["validation_metrics"] = evaluate_validation_result(
             validation_report=output,
-            metadata={},
+            metadata=local_metadata,
         )
     write_json(run_dir / "validation_only_report.json", output)
     print_json(output)
@@ -109,6 +111,19 @@ def _task_id_from_run_dir(run_dir: Path) -> str | None:
     if marker in name:
         return name.split(marker, 1)[0]
     return None
+
+
+def _local_validation_metadata(run_dir: Path) -> dict[str, object]:
+    oracle_path = run_dir / "validation_oracle.json"
+    metadata_path = run_dir / "metadata.json"
+    if oracle_path.exists():
+        payload = read_json(oracle_path)
+        if "validation_oracle" in payload:
+            return payload
+        return {"validation_oracle": payload}
+    if metadata_path.exists():
+        return read_json(metadata_path)
+    return {}
 
 
 if __name__ == "__main__":

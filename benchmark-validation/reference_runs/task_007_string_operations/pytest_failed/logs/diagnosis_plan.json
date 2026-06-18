@@ -1,0 +1,281 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/catalog/search.py"
+  ],
+  "affected_source_files": [
+    "src/catalog/search.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_search.py"
+  ],
+  "complexity": {
+    "src/catalog/search.py": "low"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/catalog/search.py",
+        "symbols": [
+          {
+            "name": "search_by_keyword",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "str.contains",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "pd.read_csv",
+              "df['name']",
+              "str.contains",
+              "sort_values"
+            ]
+          },
+          {
+            "name": "normalize_catalog",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "str.strip",
+              "str.lower",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "pd.read_csv",
+              "df['category']",
+              "str.strip",
+              "str.lower",
+              "sort_values"
+            ]
+          },
+          {
+            "name": "items_starting_with",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "str.startswith",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "pd.read_csv",
+              "df['name']",
+              "str.startswith",
+              "sort_values"
+            ]
+          },
+          {
+            "name": "uppercase_names",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "str.upper",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "pd.read_csv",
+              "df['name']",
+              "str.upper",
+              "sort_values"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/catalog/search.py",
+        "symbol": "search_by_keyword",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/catalog/search.py",
+        "symbol": "normalize_catalog",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/catalog/search.py",
+        "symbol": "items_starting_with",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/catalog/search.py",
+        "symbol": "uppercase_names",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Applied least-scope planning: split src/catalog/search.py into 4 symbol-level steps."
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/catalog/search.py",
+      "description": "Migrate search_by_keyword in src/catalog/search.py.",
+      "allowed_files": [
+        "src/catalog/search.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "search_by_keyword"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "API syntax change",
+        "behavioral nuances in string handling"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_symbol"
+    },
+    {
+      "step_id": "step_002",
+      "file": "src/catalog/search.py",
+      "description": "Migrate normalize_catalog in src/catalog/search.py.",
+      "allowed_files": [
+        "src/catalog/search.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "normalize_catalog"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "API syntax change",
+        "behavioral nuances in string handling"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_symbol"
+    },
+    {
+      "step_id": "step_003",
+      "file": "src/catalog/search.py",
+      "description": "Migrate items_starting_with in src/catalog/search.py.",
+      "allowed_files": [
+        "src/catalog/search.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "items_starting_with"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "API syntax change",
+        "behavioral nuances in string handling"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_symbol"
+    },
+    {
+      "step_id": "step_004",
+      "file": "src/catalog/search.py",
+      "description": "Migrate uppercase_names in src/catalog/search.py.",
+      "allowed_files": [
+        "src/catalog/search.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "uppercase_names"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "API syntax change",
+        "behavioral nuances in string handling"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_symbol"
+    }
+  ],
+  "human_review_required": false,
+  "human_review_reasons": []
+}

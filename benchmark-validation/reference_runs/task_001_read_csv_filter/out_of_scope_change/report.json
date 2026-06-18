@@ -1,0 +1,6 @@
+{
+  "task_id": "task_001_read_csv_filter",
+  "reference_case_id": "out_of_scope_change",
+  "phase": "validation_reference",
+  "description": "Correct migration plus an unplanned file outside allowed_files."
+}

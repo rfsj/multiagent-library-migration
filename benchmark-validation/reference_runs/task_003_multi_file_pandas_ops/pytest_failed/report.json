@@ -1,0 +1,7 @@
+{
+  "task_id": "task_003_multi_file_pandas_ops",
+  "reference_case_id": "pytest_failed",
+  "phase": "validation_reference",
+  "source_run_dir": "experiments/runs/task_003_multi_file_pandas_ops_20260617T030950Z_migration",
+  "description": "Existing migrated run rejected by pytest; copied as a validation reference fixture."
+}

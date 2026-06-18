@@ -1,0 +1,417 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/analytics/processing.py"
+  ],
+  "affected_source_files": [
+    "src/analytics/processing.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_processing.py"
+  ],
+  "complexity": {
+    "src/analytics/processing.py": "high"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/analytics/processing.py",
+        "symbols": [
+          {
+            "name": "load_sales",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "fillna",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.read_csv",
+              "Performs column arithmetic and datetime conversion",
+              "Returns a DataFrame via sort_values and reset_index"
+            ]
+          },
+          {
+            "name": "paid_high_value_orders",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses DataFrame slicing with boolean masks",
+              "Calls load_sales for initial DataFrame",
+              "Returns a sorted subset of the DataFrame"
+            ]
+          },
+          {
+            "name": "revenue_by_region",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "groupby",
+              "agg",
+              "sort_values",
+              "reset_index",
+              "round"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses groupby and agg for aggregation",
+              "Calls load_sales for initial DataFrame"
+            ]
+          },
+          {
+            "name": "customer_lifetime_value",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "groupby",
+              "agg",
+              "merge",
+              "fillna",
+              "astype",
+              "apply",
+              "sort_values",
+              "round"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Calls load_sales for initial DataFrame",
+              "Uses merge for joining with customers file",
+              "Uses apply for custom segment creation"
+            ]
+          },
+          {
+            "name": "monthly_product_matrix",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "pivot_table",
+              "reset_index",
+              "sort_values",
+              "round"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.pivot_table for reshaping",
+              "Calls load_sales for initial DataFrame"
+            ]
+          },
+          {
+            "name": "latest_order_per_customer",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values",
+              "drop_duplicates"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses drop_duplicates to find latest entry per customer",
+              "Calls load_sales for initial DataFrame"
+            ]
+          },
+          {
+            "name": "invalid_sales_rows",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": false,
+            "receives_dataframe_like": true,
+            "returns_dataframe_like": true,
+            "methods": [
+              "isna",
+              "isin"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_sales"
+            ],
+            "consumes_dataframe_from": [
+              "load_sales"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses boolean masking to identify invalid rows",
+              "Calls load_sales for initial DataFrame"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "load_sales",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "paid_high_value_orders",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "revenue_by_region",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "customer_lifetime_value",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "monthly_product_matrix",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "latest_order_per_customer",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/analytics/processing.py",
+        "symbol": "invalid_sales_rows",
+        "role": "transformer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_sales"
+        ],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Added requirements.txt to the first migration step because the target dependency is not present."
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/analytics/processing.py",
+      "description": "Migrate load_sales function to Polars as it is the foundation for all other functions.",
+      "allowed_files": [
+        "src/analytics/processing.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [
+        "load_sales"
+      ],
+      "files": [],
+      "risk_level": "medium",
+      "risk_factors": [
+        "Type conversion differences (datetime)",
+        "API changes in read_csv"
+      ],
+      "requires_human_review": true,
+      "human_review_reasons": [
+        "Core foundation function, all other operations depend on this data structure"
+      ],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_002",
+      "file": "src/analytics/processing.py",
+      "description": "Migrate simple analytical functions that perform filtering and sorting.",
+      "allowed_files": [
+        "src/analytics/processing.py"
+      ],
+      "allowed_symbols": [
+        "paid_high_value_orders",
+        "latest_order_per_customer",
+        "invalid_sales_rows"
+      ],
+      "files": [],
+      "risk_level": "low",
+      "risk_factors": [
+        "Boolean masking syntax changes"
+      ],
+      "requires_human_review": false,
+      "human_review_reasons": [],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_003",
+      "file": "src/analytics/processing.py",
+      "description": "Migrate complex aggregation and merging functions.",
+      "allowed_files": [
+        "src/analytics/processing.py"
+      ],
+      "allowed_symbols": [
+        "revenue_by_region",
+        "customer_lifetime_value"
+      ],
+      "files": [],
+      "risk_level": "high",
+      "risk_factors": [
+        "Aggregations and merges handle missing values and indices differently in Polars",
+        "Custom lambda apply logic needs to be converted to expression-based logic"
+      ],
+      "requires_human_review": true,
+      "human_review_reasons": [
+        "Complex aggregation semantics and join logic",
+        "Polars does not support arbitrary apply; must be rewritten using native expressions"
+      ],
+      "status": "planned",
+      "step_type": "single_file"
+    },
+    {
+      "step_id": "step_004",
+      "file": "src/analytics/processing.py",
+      "description": "Migrate pivoting function.",
+      "allowed_files": [
+        "src/analytics/processing.py"
+      ],
+      "allowed_symbols": [
+        "monthly_product_matrix"
+      ],
+      "files": [],
+      "risk_level": "high",
+      "risk_factors": [
+        "Pivot table logic differs significantly in Polars",
+        "String formatting and datetime extraction"
+      ],
+      "requires_human_review": true,
+      "human_review_reasons": [
+        "Reshaping logic is conceptually different and requires replacing pandas pivot_table with Polars pivot"
+      ],
+      "status": "planned",
+      "step_type": "single_file"
+    }
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "step_001 (src/analytics/processing.py): Core foundation function, all other operations depend on this data structure",
+    "step_003 (src/analytics/processing.py): Complex aggregation semantics and join logic",
+    "step_003 (src/analytics/processing.py): Polars does not support arbitrary apply; must be rewritten using native expressions",
+    "step_004 (src/analytics/processing.py): Reshaping logic is conceptually different and requires replacing pandas pivot_table with Polars pivot"
+  ]
+}

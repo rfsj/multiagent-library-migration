@@ -1,0 +1,357 @@
+{
+  "agent": "diagnosis_agent",
+  "planner_version": "v3",
+  "source_library": "pandas",
+  "target_library": "polars",
+  "read_only": true,
+  "dependency_files": [
+    "requirements.txt"
+  ],
+  "dependency_summary": {
+    "source_library": "pandas",
+    "target_library": "polars",
+    "source_dependency_present": true,
+    "target_dependency_present": false,
+    "source_dependency_specs": [
+      {
+        "file": "requirements.txt",
+        "name": "pandas",
+        "constraint": "==2.2.3",
+        "raw": "pandas==2.2.3"
+      }
+    ],
+    "target_dependency_specs": [],
+    "target_dependency_action": "add_dependency"
+  },
+  "affected_files": [
+    "src/finance/prices.py",
+    "src/finance/signals.py"
+  ],
+  "affected_source_files": [
+    "src/finance/prices.py",
+    "src/finance/signals.py"
+  ],
+  "test_files_with_source_library_usage": [],
+  "related_tests": [
+    "tests/test_finance.py"
+  ],
+  "complexity": {
+    "src/finance/prices.py": "medium",
+    "src/finance/signals.py": "high"
+  },
+  "symbol_analysis": {
+    "files": [
+      {
+        "file": "src/finance/prices.py",
+        "symbols": [
+          {
+            "name": "load_ticks",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "fillna",
+              "notna",
+              "copy",
+              "sort_values",
+              "drop_duplicates",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.read_csv",
+              "Accesses columns 'timestamp', 'price', 'symbol'",
+              "Transforms dataframe"
+            ]
+          },
+          {
+            "name": "daily_price_features",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "set_index",
+              "groupby",
+              "resample",
+              "agg",
+              "drop",
+              "reset_index",
+              "ffill",
+              "pct_change",
+              "rolling",
+              "mean",
+              "sum",
+              "round",
+              "sort_values"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_ticks"
+            ],
+            "consumes_dataframe_from": [
+              "load_ticks"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Calls load_ticks",
+              "Performs time-series resampling and grouping",
+              "Calculates rolling statistics"
+            ]
+          },
+          {
+            "name": "latest_close_by_symbol",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values",
+              "drop_duplicates"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "load_ticks"
+            ],
+            "consumes_dataframe_from": [
+              "load_ticks"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Calls load_ticks",
+              "Subsets dataframe columns"
+            ]
+          }
+        ],
+        "notes": []
+      },
+      {
+        "file": "src/finance/signals.py",
+        "symbols": [
+          {
+            "name": "load_signals",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "read_csv",
+              "to_datetime",
+              "fillna",
+              "str.strip",
+              "str.lower",
+              "notna",
+              "copy",
+              "sort_values",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [],
+            "consumes_dataframe_from": [],
+            "confidence": "high",
+            "evidence": [
+              "Uses pandas to parse signal CSV",
+              "Processes columns 'timestamp', 'signal', 'confidence'"
+            ]
+          },
+          {
+            "name": "align_signals_to_prices",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "sort_values",
+              "merge_asof",
+              "fillna",
+              "round",
+              "reset_index"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "daily_price_features",
+              "load_signals"
+            ],
+            "consumes_dataframe_from": [
+              "daily_price_features",
+              "load_signals"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses pd.merge_asof to align dataframes",
+              "Performs vectorized arithmetic on columns"
+            ]
+          },
+          {
+            "name": "signal_performance_summary",
+            "kind": "function",
+            "explicit_source_usage": true,
+            "dataframe_like_usage": true,
+            "creates_dataframe_like": true,
+            "receives_dataframe_like": false,
+            "returns_dataframe_like": true,
+            "methods": [
+              "isin",
+              "copy",
+              "apply",
+              "groupby",
+              "agg",
+              "sort_values",
+              "reset_index",
+              "round"
+            ],
+            "column_or_index_access": true,
+            "local_calls": [
+              "align_signals_to_prices"
+            ],
+            "consumes_dataframe_from": [
+              "align_signals_to_prices"
+            ],
+            "confidence": "high",
+            "evidence": [
+              "Uses row-wise apply",
+              "Groupby-aggregate operations"
+            ]
+          }
+        ],
+        "notes": []
+      }
+    ],
+    "notes": []
+  },
+  "dataframe_flow_analysis": {
+    "symbols": [
+      {
+        "file": "src/finance/prices.py",
+        "symbol": "load_ticks",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/finance/prices.py",
+        "symbol": "daily_price_features",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_ticks"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/finance/prices.py",
+        "symbol": "latest_close_by_symbol",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "load_ticks"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/finance/signals.py",
+        "symbol": "load_signals",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/finance/signals.py",
+        "symbol": "align_signals_to_prices",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "daily_price_features",
+          "load_signals"
+        ],
+        "type_contract": "unknown"
+      },
+      {
+        "file": "src/finance/signals.py",
+        "symbol": "signal_performance_summary",
+        "role": "producer",
+        "returns_dataframe": true,
+        "consumes_dataframe_from": [
+          "align_signals_to_prices"
+        ],
+        "type_contract": "unknown"
+      }
+    ],
+    "groups": [
+      {
+        "group_id": "flow_group_001",
+        "files": [
+          "src/finance/prices.py",
+          "src/finance/signals.py"
+        ],
+        "symbols": [
+          "align_signals_to_prices",
+          "daily_price_features",
+          "latest_close_by_symbol",
+          "load_signals",
+          "load_ticks",
+          "signal_performance_summary"
+        ],
+        "reason": "Symbol analysis found DataFrame-like values produced in one of these files and consumed in another.",
+        "planning_strategy": "grouped_before_consumers"
+      }
+    ],
+    "notes": []
+  },
+  "planner_warnings": [
+    "Kept src/finance/prices.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Kept src/finance/signals.py as one file-level step because DataFrame flow analysis marked it as coupled with other migration targets.",
+    "Grouped DataFrame flow files into one atomic migration step: src/finance/prices.py, src/finance/signals.py",
+    "Added requirements.txt to the first migration step because the target dependency is not present."
+  ],
+  "migration_steps": [
+    {
+      "step_id": "step_001",
+      "file": "src/finance/prices.py",
+      "description": "Migrate coupled DataFrame flow (2 files atomically).",
+      "allowed_files": [
+        "src/finance/prices.py",
+        "src/finance/signals.py",
+        "requirements.txt"
+      ],
+      "allowed_symbols": [],
+      "files": [
+        "src/finance/prices.py",
+        "src/finance/signals.py"
+      ],
+      "risk_level": "medium",
+      "risk_factors": [
+        "time-series resampling and grouping",
+        "rolling window calculations"
+      ],
+      "requires_human_review": true,
+      "human_review_reasons": [
+        "Polars API for rolling and resampling differs from pandas; verify window semantics."
+      ],
+      "status": "planned",
+      "step_type": "grouped"
+    }
+  ],
+  "human_review_required": true,
+  "human_review_reasons": [
+    "step_001 (src/finance/prices.py): Polars API for rolling and resampling differs from pandas; verify window semantics."
+  ]
+}

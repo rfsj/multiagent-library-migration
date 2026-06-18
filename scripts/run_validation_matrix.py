@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -22,7 +23,9 @@ from experiment_utils import ROOT, print_json, utc_timestamp, write_json
 
 RUN_LEVEL_COLUMNS = [
     "task_id",
+    "case_id",
     "run_dir",
+    "source_run_dir",
     "oracle_available",
     "expected_verdict",
     "observed_verdict",
@@ -80,15 +83,25 @@ def main() -> int:
         return 0
 
     started = time.perf_counter()
+    matrix_id = f"validation_matrix_{utc_timestamp()}"
     matrix_dir = (
-        ROOT / "experiments" / "evaluations" / f"validation_matrix_{utc_timestamp()}"
+        ROOT / "experiments" / "evaluations" / matrix_id
     )
     matrix_dir.mkdir(parents=True, exist_ok=True)
+    benchmark_validation_dir = ROOT / "benchmark-validation" / "runs" / matrix_id
 
     results = []
+    evaluated_run_dirs = []
     for run_dir in run_dirs:
-        print(f"=== run_dir={run_dir} ===", file=sys.stderr)
-        results.append(_run_validation_only(run_dir))
+        evaluation_run_dir = _materialize_reference_run(
+            run_dir, benchmark_validation_dir
+        )
+        evaluated_run_dirs.append(evaluation_run_dir)
+        print(f"=== run_dir={evaluation_run_dir} ===", file=sys.stderr)
+        result = _run_validation_only(evaluation_run_dir)
+        if evaluation_run_dir != run_dir:
+            result["source_run_dir"] = str(run_dir)
+        results.append(result)
 
     run_rows = _build_run_level_rows(results)
     summary_rows = [_build_summary_row(results)]
@@ -98,6 +111,8 @@ def main() -> int:
     summary = {
         "phase": "validation_matrix",
         "runs": [str(path) for path in run_dirs],
+        "evaluated_runs": [str(path) for path in evaluated_run_dirs],
+        "benchmark_validation_dir": str(benchmark_validation_dir),
         "matrix_dir": str(matrix_dir),
         "run_level_csv": str(matrix_dir / "validation_run_level.csv"),
         "summary_csv": str(matrix_dir / "validation_summary.csv"),
@@ -114,10 +129,13 @@ def _resolve_run_dirs(raw: str) -> list[Path]:
     if candidate.exists() and candidate.is_dir():
         run_level = candidate / "run_level.csv"
         migration_run_level = candidate / "migration_run_level.csv"
+        reference_runs = _reference_run_dirs(candidate)
         if run_level.exists():
             return _run_dirs_from_csv(run_level)
         if migration_run_level.exists():
             return _run_dirs_from_csv(migration_run_level)
+        if reference_runs:
+            return reference_runs
         return [candidate.resolve()]
     if candidate.exists() and candidate.is_file():
         return [
@@ -136,6 +154,41 @@ def _run_dirs_from_csv(path: Path) -> list[Path]:
             if run_dir:
                 run_dirs.append(Path(run_dir).resolve())
     return run_dirs
+
+
+def _reference_run_dirs(path: Path) -> list[Path]:
+    manifest = path / "validation_reference_manifest.json"
+    if manifest.exists():
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        runs = payload.get("runs") or []
+        return [(path / item).resolve() for item in runs]
+    return sorted(
+        child.resolve()
+        for child in path.iterdir()
+        if child.is_dir()
+        and (child / "project").exists()
+        and (child / "snapshots" / "before_migration").exists()
+        and (child / "logs" / "diagnosis_plan.json").exists()
+    )
+
+
+def _materialize_reference_run(run_dir: Path, benchmark_validation_dir: Path) -> Path:
+    if not _is_benchmark_reference_run(run_dir):
+        return run_dir
+    relative_run = run_dir.relative_to(ROOT / "benchmark-validation" / "reference_runs")
+    target = benchmark_validation_dir / relative_run
+    shutil.copytree(run_dir, target)
+    return target.resolve()
+
+
+def _is_benchmark_reference_run(run_dir: Path) -> bool:
+    try:
+        run_dir.relative_to(ROOT / "benchmark-validation" / "reference_runs")
+    except ValueError:
+        return False
+    return (run_dir / "validation_oracle.json").exists() and (
+        run_dir / "logs" / "diagnosis_plan.json"
+    ).exists()
 
 
 def _run_validation_only(run_dir: Path) -> dict[str, Any]:
@@ -183,7 +236,9 @@ def _build_run_level_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]
         rows.append(
             {
                 "task_id": result.get("task_id"),
+                "case_id": _case_id(result),
                 "run_dir": result.get("run_dir"),
+                "source_run_dir": result.get("source_run_dir"),
                 "oracle_available": metrics.get("oracle_available"),
                 "expected_verdict": metrics.get("expected_verdict"),
                 "observed_verdict": metrics.get("observed_verdict"),
@@ -259,6 +314,17 @@ def _build_summary_row(results: list[dict[str, Any]]) -> dict[str, Any]:
             ]
         ),
     }
+
+
+def _case_id(result: dict[str, Any]) -> str | None:
+    source = result.get("source_run_dir") or result.get("run_dir")
+    if not source:
+        return None
+    path = Path(str(source))
+    try:
+        return str(path.relative_to(ROOT / "benchmark-validation" / "reference_runs"))
+    except ValueError:
+        return path.name
 
 
 def _task_id_from_run_dir(run_dir: Path) -> str | None:

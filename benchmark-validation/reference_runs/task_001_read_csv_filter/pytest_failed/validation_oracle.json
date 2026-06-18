@@ -1,0 +1,7 @@
+{
+  "expected_verdict": "rejected",
+  "expected_rejection_reasons": [
+    "pytest_failed"
+  ],
+  "must_detect": []
+}

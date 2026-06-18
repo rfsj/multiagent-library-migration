@@ -1,0 +1,9 @@
+{
+  "expected_verdict": "rejected",
+  "expected_rejection_reasons": [
+    "out_of_scope_change"
+  ],
+  "must_detect": [
+    "UNPLANNED_CHANGE.txt"
+  ]
+}

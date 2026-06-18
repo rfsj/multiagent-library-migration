@@ -1,0 +1,6 @@
+{
+  "task_id": "task_001_read_csv_filter",
+  "reference_case_id": "pytest_failed",
+  "phase": "validation_reference",
+  "description": "In-scope migration with a behavioral regression detected by pytest."
+}
