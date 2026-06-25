@@ -89,6 +89,10 @@ def test_planner_v3_run_applies_least_scope_and_writes_logs(tmp_path, monkeypatc
                         kind="function",
                         explicit_source_usage=True,
                         dataframe_like_usage=True,
+                        creates_dataframe_like=True,
+                        returns_dataframe_like=True,
+                        methods=["read_csv"],
+                        evidence=["Calls pd.read_csv to load paid orders."],
                         confidence="high",
                     ),
                     PlannerV3SymbolAnalysis(
@@ -96,6 +100,10 @@ def test_planner_v3_run_applies_least_scope_and_writes_logs(tmp_path, monkeypatc
                         kind="function",
                         explicit_source_usage=True,
                         dataframe_like_usage=True,
+                        creates_dataframe_like=True,
+                        returns_dataframe_like=True,
+                        methods=["read_csv"],
+                        evidence=["Calls pd.read_csv to load pending orders."],
                         confidence="high",
                     ),
                 ],
@@ -116,6 +124,13 @@ def test_planner_v3_run_applies_least_scope_and_writes_logs(tmp_path, monkeypatc
         ["load_paid"],
         ["load_pending"],
     ]
+    assert result["migration_steps"][0]["description"] == (
+        "Migrate orders. Limit this change to top-level function load_paid. "
+        "Preserve behavior for uses source-library APIs directly; uses "
+        "DataFrame-like operations; creates and returns DataFrame-like data; "
+        "key operations: read_csv. Evidence: Calls pd.read_csv to load paid "
+        "orders."
+    )
     assert "requirements.txt" in result["migration_steps"][0]["allowed_files"]
     assert (logs_dir / "diagnosis_plan.json").exists()
     assert (logs_dir / "planner_symbol_analysis.json").exists()
@@ -295,6 +310,12 @@ def test_planner_v3_groups_cross_file_dataframe_flow(tmp_path, monkeypatch):
     assert step["step_type"] == "grouped"
     assert step["files"] == ["src/loaders.py", "src/reports.py"]
     assert step["allowed_symbols"] == []
+    assert step["description"] == (
+        "Migrate coupled DataFrame flow across src/loaders.py and "
+        "src/reports.py atomically. Preserve DataFrame producers load_orders. "
+        "Preserve producer/consumer compatibility: summarize consumes "
+        "load_orders."
+    )
     assert result["dataframe_flow_analysis"]["groups"][0]["planning_strategy"] == (
         "grouped_before_consumers"
     )

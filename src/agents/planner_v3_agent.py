@@ -970,8 +970,9 @@ def _apply_flow_grouping(
         primary["allowed_files"] = allowed_files
         primary["allowed_symbols"] = []
         primary["step_type"] = "grouped"
-        primary["description"] = (
-            f"Migrate coupled DataFrame flow ({len(ordered_files)} files atomically)."
+        primary["description"] = _flow_group_description(
+            ordered_files,
+            dataframe_flow_analysis,
         )
         merged_steps.append(primary)
         _record_guardrail(
@@ -993,6 +994,62 @@ def _apply_flow_grouping(
 
     remaining = [step for step in steps if id(step) not in used_steps]
     return merged_steps + remaining
+
+
+def _flow_group_description(
+    files: list[str],
+    dataframe_flow_analysis: dict[str, Any],
+) -> str:
+    file_set = set(files)
+    symbols = [
+        symbol
+        for symbol in dataframe_flow_analysis.get("symbols", [])
+        if symbol.get("file") in file_set and symbol.get("symbol")
+    ]
+    producers = [
+        symbol["symbol"]
+        for symbol in symbols
+        if symbol.get("returns_dataframe") and not symbol.get("consumes_dataframe_from")
+    ]
+    consumers = [
+        symbol
+        for symbol in symbols
+        if symbol.get("consumes_dataframe_from")
+    ]
+    parts = [
+        "Migrate coupled DataFrame flow across "
+        f"{_format_inline_list(files)} atomically."
+    ]
+    if producers:
+        parts.append(
+            "Preserve DataFrame producers "
+            f"{_format_inline_list(producers)}."
+        )
+    if consumers:
+        consumer_details = [
+            f"{consumer['symbol']} consumes "
+            f"{_format_inline_list(consumer.get('consumes_dataframe_from', []))}"
+            for consumer in consumers[:4]
+        ]
+        if len(consumers) > 4:
+            consumer_details.append(f"{len(consumers) - 4} more consumers")
+        parts.append(
+            "Preserve producer/consumer compatibility: "
+            + "; ".join(consumer_details)
+            + "."
+        )
+    return " ".join(parts)
+
+
+def _format_inline_list(items: list[str]) -> str:
+    cleaned = [item for item in items if item]
+    if not cleaned:
+        return "none"
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
 
 
 def _file_dependency_order(
@@ -1086,7 +1143,12 @@ def _least_scope_steps(
     split_steps = []
     for symbol in symbols:
         scoped = dict(step)
-        scoped["description"] = f"Migrate {symbol} in {rel_file}."
+        scoped["description"] = _least_scope_description(
+            step.get("description", ""),
+            rel_file,
+            symbol,
+            symbol_analysis,
+        )
         scoped["allowed_symbols"] = [symbol]
         scoped["step_type"] = "single_symbol"
         split_steps.append(scoped)
@@ -1095,6 +1157,63 @@ def _least_scope_steps(
         f"{len(split_steps)} symbol-level steps."
     )
     return split_steps
+
+
+def _least_scope_description(
+    base_description: str,
+    rel_file: str,
+    symbol_name: str,
+    symbol_analysis: dict[str, Any],
+) -> str:
+    prefix = base_description.strip() or f"Migrate {rel_file}."
+    symbol = _symbol_analysis_for_symbol(symbol_analysis, rel_file, symbol_name)
+    if not symbol:
+        return f"{prefix} Limit this change to top-level symbol {symbol_name}."
+
+    kind = symbol.get("kind") or "symbol"
+    details: list[str] = []
+    if symbol.get("explicit_source_usage"):
+        details.append("uses source-library APIs directly")
+    if symbol.get("dataframe_like_usage"):
+        details.append("uses DataFrame-like operations")
+
+    dataframe_roles = []
+    if symbol.get("creates_dataframe_like"):
+        dataframe_roles.append("creates")
+    if symbol.get("receives_dataframe_like"):
+        dataframe_roles.append("receives")
+    if symbol.get("returns_dataframe_like"):
+        dataframe_roles.append("returns")
+    if dataframe_roles:
+        details.append(
+            f"{_format_inline_list(dataframe_roles)} DataFrame-like data"
+        )
+
+    methods = symbol.get("methods", [])
+    if methods:
+        details.append(f"key operations: {_format_inline_list(methods[:8])}")
+    if symbol.get("column_or_index_access"):
+        details.append("accesses columns or indexes")
+
+    consumed_from = symbol.get("consumes_dataframe_from", [])
+    if consumed_from:
+        details.append(
+            "consumes DataFrame output from "
+            f"{_format_inline_list(consumed_from)}"
+        )
+
+    description = f"{prefix} Limit this change to top-level {kind} {symbol_name}."
+    if details:
+        description += " Preserve behavior for " + "; ".join(details) + "."
+
+    evidence = [
+        item
+        for item in symbol.get("evidence", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    if evidence:
+        description += " Evidence: " + " ".join(evidence[:2])
+    return description
 
 
 def _deduplicate_steps(
@@ -1199,6 +1318,20 @@ def _symbol_analysis_for_file(
     for file_analysis in symbol_analysis.get("files", []):
         if file_analysis.get("file") == rel_file:
             return file_analysis
+    return None
+
+
+def _symbol_analysis_for_symbol(
+    symbol_analysis: dict[str, Any],
+    rel_file: str,
+    symbol_name: str,
+) -> dict[str, Any] | None:
+    file_analysis = _symbol_analysis_for_file(symbol_analysis, rel_file)
+    if not file_analysis:
+        return None
+    for symbol in file_analysis.get("symbols", []):
+        if symbol.get("name") == symbol_name:
+            return symbol
     return None
 
 
